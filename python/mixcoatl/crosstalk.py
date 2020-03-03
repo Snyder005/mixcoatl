@@ -1,3 +1,9 @@
+"""
+Analysis tasks for crosstalk.
+
+To Do:
+   * Make sure YAML file writing is working properly.
+"""
 import os
 import glob
 import numpy as np

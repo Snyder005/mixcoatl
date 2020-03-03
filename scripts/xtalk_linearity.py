@@ -213,7 +213,7 @@ class CrosstalkMatrix():
 
                 indent -= dIndent
 
-def main(main_dir, calib_dir, aggressor_id, victim_id=None, output_dir='./', 
+def main(calib_dir, aggressor_id, victim_id=None, output_dir='./', 
          use_multiprocessing=False):
 
     ## Task configurables
@@ -268,7 +268,15 @@ def main(main_dir, calib_dir, aggressor_id, victim_id=None, output_dir='./',
     victim_noise = calculate_noise(victim_bias)
 
     ## Sort directories by central CCD
-    directory_list = [x.path for x in os.scandir(main_dir) if os.path.isdir(x.path)]
+    main_dir_list = ['/gpfs/slac/lsst/fs3/g/data/jobHarness/jh_archive-test/LCA-10134_Cryostat/LCA-10134_Cryostat-0001/6827D/BOT_acq/v0/47948/',
+                     '/gpfs/slac/lsst/fs3/g/data/jobHarness/jh_archive-test/LCA-10134_Cryostat/LCA-10134_Cryostat-0001/6826D/BOT_acq/v0/47943/',
+                     '/gpfs/slac/lsst/fs3/g/data/jobHarness/jh_archive-test/LCA-10134_Cryostat/LCA-10134_Cryostat-0001/6828D/BOT_acq/v0/47953/']
+#    main_dir_list = ['/gpfs/slac/lsst/fs3/g/data/jobHarness/jh_archive-test/LCA-10134_Cryostat/LCA-10134_Cryostat-0001/6833D/BOT_acq/v0/47981/',
+#                     '/gpfs/slac/lsst/fs3/g/data/jobHarness/jh_archive-test/LCA-10134_Cryostat/LCA-10134_Cryostat-0001/6832D/BOT_acq/v0/47976/']
+    directory_list = []
+    for main_dir in main_dir_list:
+        directory_list += [x.path for x in os.scandir(main_dir) if os.path.isdir(x.path)]
+
     xtalk_dict = {}
     for acquisition_dir in directory_list:
         basename = os.path.basename(acquisition_dir)
@@ -347,17 +355,15 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('aggressor_id', type=str)
-    parser.add_argument('main_dir', type=str)
     parser.add_argument('calib_dir', type=str)
     parser.add_argument('-v', '--victim_id', type=str, default=None)
     parser.add_argument('-o', '--output_dir', type=str, default='./')
     args = parser.parse_args()
 
     aggressor_id = args.aggressor_id
-    main_dir = args.main_dir
     calib_dir = args.calib_dir
     victim_id = args.victim_id
     output_dir = args.output_dir
 
-    main(main_dir, calib_dir, aggressor_id,
+    main(calib_dir, aggressor_id,
          victim_id=victim_id, output_dir=output_dir)
