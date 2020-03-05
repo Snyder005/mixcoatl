@@ -8,6 +8,27 @@ import scipy
 from scipy import optimize
 from scipy.spatial import distance
 
+class GridDisplacements:
+    """Handler class for grid displacement results."""
+
+    def __init__(self, model_grid):
+
+        self.hdr = fits.Header()
+        self.hdr['X0'] = model_grid.x0
+        self.hdr['Y0'] = model_grid.y0
+        self.hdr['DX'] = model_grid.dx
+        self.hdr['DY'] = model_grid.dy
+        self.hdr['THETA'] = model_grid.theta
+        self.columns = None
+
+    def from_fits(self):
+        raise NotImplementedError
+
+    def write_fits(self, outfile, **kwargs):
+
+        hdu = fits.BinTableHDU.from_columns(self.columns, header=self.hdr)
+        self.hdu.writeto(outfile, **kwargs)
+
 class SourceGrid:
     """Infinite undistorted grid of points.
     
@@ -161,8 +182,7 @@ def mask_by_ccd_geom(y, x, ccd_geometry):
     Args:
         y: Array of source y-positions.
         x: Array of source x-positions.
-        x_bounds: Tuple describing min/max CCD extent in x-direction.
-        y_bounds: Tuple describing min/max CCD extent in y-direction.
+        ccd_geometry: Dictionary describing min/max CCD extent in x/y-directions.
         
     Returns:
         Tuple of y/x positional arrays, removing entries outside
@@ -211,4 +231,4 @@ def grid_fit_error(params, src_y, src_x, nrows, ncols):
     indices, distances = coordinate_distances(grid_y, grid_x, src_y, src_x)
     nn_distances = distances[:, 0]
     
-    return nn_distances.mean()
+    return nn_distances.median()
