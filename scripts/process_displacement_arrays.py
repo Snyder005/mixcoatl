@@ -45,28 +45,29 @@ def main(infiles, output_dir='./'):
     for n in range(49*49):
 
         elem = rotated_norm_disp[:, n, :]
-        if np.count_nonzero(~np.isnan(elem[:, 0])) > 0:
+        if np.count_nonzero(~np.isnan(elem[:, 0])) > 0: # check there are unmasked values
 
+            ## Mask outliers (is this needed?)
+            # here calculate mean along all dithers
             meanx = np.nanmean(elem[:,0])
             stdevx = np.nanstd(elem[:,0])
-
             meany = np.nanmean(elem[:,1])
             stdevy = np.nanstd(elem[:,1])
 
+            # Masking by standard deviation?
             if stdevx>0.0015:
                 x_bools = np.logical_and(elem[:,0]>(meanx-stdevx), elem[:,0]<(meanx+stdevx))
             else:
                 x_bools = np.logical_and(elem[:,0]>(meanx-(2.5*stdevx)), elem[:,0]<(meanx+(2.5*stdevx)))
-
             if stdevy>.0015:
                 y_bools = np.logical_and(elem[:,1]>(meany-stdevy), elem[:,1]<(meany+stdevy))
             else:
                 y_bools = np.logical_and(elem[:,1]>(meany-(2.5*stdevy)), elem[:,1]<(meany+(2.5*stdevy)))
 
-
             ind_arr = np.where(np.logical_and(x_bools,y_bools))[0]
             new_el = elem[ind_arr,:]
 
+            ## If more than 20 unmasked values, then do final mean calculation
             if new_el.shape[0]>20:
                 avx = np.nanmean(new_el[:,0])*mean_grid_dx
                 avy = np.nanmean(new_el[:,1])*mean_grid_dy

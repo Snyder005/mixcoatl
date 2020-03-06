@@ -1,3 +1,8 @@
+"""Source grid fitting classes and functions.
+
+To Do:
+   * Change grid dy/dx to ystep/xstep
+"""
 from __future__ import print_function
 from __future__ import absolute_import
 import os
@@ -10,24 +15,68 @@ from scipy.spatial import distance
 
 class GridDisplacements:
     """Handler class for grid displacement results."""
+    colnames = ['DX', 'DY', 'DXX', 'DYY', 'X', 'Y', 'XX', 'YY', 'FLUX']
 
-    def __init__(self, model_grid):
+    def __init__(self, source_grid, nrows, ncols, data):
 
-        self.hdr = fits.Header()
-        self.hdr['X0'] = model_grid.x0
-        self.hdr['Y0'] = model_grid.y0
-        self.hdr['DX'] = model_grid.dx
-        self.hdr['DY'] = model_grid.dy
-        self.hdr['THETA'] = model_grid.theta
-        self.columns = None
+        # Do I really need the source grid?
+        self.source_grid = source_grid
+        self.nrows = nrows
+        self.ncols = ncols
+        self.data = data
 
-    def from_fits(self):
-        raise NotImplementedError
+    def __getitem__(self, column):
+
+        return self.data[column]
+
+    @classmethod
+    def from_fits(self, infile):
+
+        with fits.open(infile) as hdulist:
+
+            # Maybe make this a class method of Source Grid?
+            x0 = hdulist[0].header['X0']
+            y0 = hdulist[0].header['Y0']
+            theta = hdulist[0].header['THETA']
+            xstep = hdulist[0].header['XSTEP']
+            ystep = hdulist[0].header['YSTEP']
+            ncols = hdulist[0].header['NCOLS']
+            nrows = hdulist[0].header['NROWS']
+            source_grid = SourceGrid(ystep, xstep, theta, y0, x0)
+
+            data = {}
+            for col in self.colnames:
+                data[col] = hdulist[1].data[col]
+
+        return cls(source_grid, nrows, ncols, data)
+
+    def mask_entries(self, l):
+        
+        ## Consider making this using astropy and masked arrays
+        bad_indices = np.hypot(self.data['DX'], self.data['DY']) >= l
+        self.data['DX'][bad_indices] = np.nan
+        self.data['DY'][bad_indices] = np.nan
+        self.data['DXX'][bad_indices] = np.nan
+        self.data['DYY'][bad_indices] = np.nan
+        self.data['FLUX'][bad_indices] = np.nan
 
     def write_fits(self, outfile, **kwargs):
 
-        hdu = fits.BinTableHDU.from_columns(self.columns, header=self.hdr)
-        self.hdu.writeto(outfile, **kwargs)
+        hdr = fits.Header()
+        hdr['X0'] = self.source_grid.x0
+        hdr['Y0'] = self.source_grid.y0
+        hdr['XSTEP'] = self.source_grid.xstep
+        hdr['YSTEP'] = self.source_grid.ystep
+        hdr['THETA'] = self.source_grid.theta
+        hdr['NCOLS'] = self.ncols
+        hdr['NROWS'] = self.nrows
+
+        columns = [fits.Column(col, array=data[col], format='D') for col in self.colnames]
+        
+        prihdu = fits.PrimaryHDU(header=hdr)
+        tablehdu = fits.BinTableHDU.from_columns(columns)
+        hdulist = fits.PrimaryHDU([prihdu, tablehdu])
+        hdulist.writeto(outfile, **kwargs)
 
 class SourceGrid:
     """Infinite undistorted grid of points.
@@ -36,16 +85,16 @@ class SourceGrid:
     a rotation angle of the grid lines with respect to the x-axis.
        
     Attributes:
-        dy: Grid spacing in the vertical direction.
-        dx: Grid spacing in the horizontal direction.
+        ystep: Grid spacing in the vertical direction.
+        xstep: Grid spacing in the horizontal direction.
         theta: Angle [rads] between the grid and global horizontal directions          
     """
     
-    def __init__(self, dy, dx, theta, y0, x0):
+    def __init__(self, ystep, xstep, theta, y0, x0):
         """Initializes SourceGrid class with grid parameters."""
         
-        self.dy = dy
-        self.dx = dx
+        self.ystep = ystep
+        self.xstep = xstep
         self.theta = theta
         self.y0 = y0
         self.x0 = x0
@@ -111,15 +160,15 @@ class SourceGrid:
         theta = mean_func(theta_array)
         if theta >= np.pi/4.:
             theta = theta - (np.pi/2.)
-            dx = mean_func(dist2_array)
-            dy = mean_func(dist1_array)
+            xstep = mean_func(dist2_array)
+            ystep = mean_func(dist1_array)
         else:
-            dx = mean_func(dist1_array)
-            dy = mean_func(dist2_array)
+            xstep = mean_func(dist1_array)
+            ystep = mean_func(dist2_array)
                 
         ## Perform constrained fit to determine y0, x0
-        guess = [dy, dx, theta, y_guess, x_guess]
-        bounds = [(dy, dy), (dx, dx), (theta, theta),
+        guess = [ystep, xstep, theta, y_guess, x_guess]
+        bounds = [(ystep, ystep), (xstep, xstep), (theta, theta),
                   (None, None), (None, None)]
         
         fit_results = scipy.optimize.minimize(grid_fit_error, guess, 
@@ -132,8 +181,8 @@ class SourceGrid:
         """Create x/y coordinate arrays for (nrows x ncols) grid of sources."""
         
         ## Create a standard nrows x ncols grid of points
-        y_array = np.asarray([n*self.dy - (nrows-1)*self.dy/2. for n in range(nrows)])
-        x_array = np.asarray([n*self.dx - (ncols-1)*self.dx/2. for n in range(ncols)])
+        y_array = np.asarray([n*self.ystep - (nrows-1)*self.ystep/2. for n in range(nrows)])
+        x_array = np.asarray([n*self.xstep - (ncols-1)*self.xstep/2. for n in range(ncols)])
         Y, X = np.meshgrid(y_array, x_array)
         
         ## Rotate grid using rotation matrix
@@ -231,4 +280,4 @@ def grid_fit_error(params, src_y, src_x, nrows, ncols):
     indices, distances = coordinate_distances(grid_y, grid_x, src_y, src_x)
     nn_distances = distances[:, 0]
     
-    return nn_distances.median()
+    return nn_distances.mean()
