@@ -1,5 +1,6 @@
-import glob
+import os
 import numpy as np
+from os.path import join, splitext
 from scipy.spatial import distance
 from astropy.io import fits
 
@@ -8,12 +9,12 @@ import lsst.pipe.base as pipeBase
 from lsst.obs.lsst import LsstCamMapper as camMapper
 from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
 
-from .sourcegrid import SourceGrid, GridDisplacements, coordinate_distances
+from .sourcegrid import SourceGrid, GridDistortions, coordinate_distances
 
 camera = camMapper._makeCamera()
 lct = LsstCameraTransforms(camera)
 
-class GridFitConfig(pexConfig.Config):
+class SourceGridConfig(pexConfig.Config):
     """Configuration for GridFitTask."""
 
     max_displacement = pexConfig.Field("Maximum distance (pixels) between matched sources.",
@@ -22,10 +23,10 @@ class GridFitConfig(pexConfig.Config):
     ncols = pexConfig.Field("Number of grid columns.", int, default=49)
     output_dir = pexConfig.Field("Output directory", str, default=".")
 
-class GridFitTask(pipeBase.Task):
+class SourceGridTask(pipeBase.Task):
     """Task to perform source grid fit."""
-    ConfigClass = GridFitConfig
-    _DefaultName = "GridFitTask"
+    ConfigClass = SourceGridConfig
+    _DefaultName = "SourceGridTask"
 
     @pipeBase.timeMethod
     def run(self, infile):
@@ -48,6 +49,12 @@ class GridFitTask(pipeBase.Task):
         ncols = self.config.ncols
         gY, gX = model_grid.make_grid(nrows=nrows, ncols=ncols)
 
+        srcX = src['base_SdssShape_x']
+        srcY = src['base_SdssShape_y']
+        srcXX = src['base_SdssShape_xx']
+        srcYY = src['base_SdssShape_yy'] 
+        srcF = src['base_SdssShape_instFlux']
+
         indices, distances = coordinate_distances(gY, gX, srcY, srcX)
         nn_indices = indices[:, 0]
 
@@ -62,9 +69,9 @@ class GridFitTask(pipeBase.Task):
         data['XX'] = np.zeros(gX.shape[0])
         data['YY'] = np.zeros(gY.shape[0])
 
-        grid_displacements = GridDisplacements(model_grid, nrows, ncols, data)
+        grid_displacements = GridDistortions(model_grid, nrows, ncols, data)
         grid_displacements.mask_entries(self.config.max_displacement)
 
-        outfile = join(output_dir, 
-                       '{0}_displacement_results.fits'.format(os.path.splitext(basename)[0]))
+        outfile = join(self.config.output_dir, 
+                       '{0}_displacement_results.fits'.format(splitext(basename)[0]))
         grid_displacements.write_fits(outfile, overwrite=True)
