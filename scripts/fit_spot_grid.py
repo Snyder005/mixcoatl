@@ -288,7 +288,7 @@ def grid_fit_error(params, src_y, src_x, nrows, ncols):
     indices, distances = coordinate_distances(grid_y, grid_x, src_y, src_x)
     nn_distances = distances[:, 0]
     
-    return nn_distances.mean()
+    return nn_distances.median()
 
 def main(catalog_list, num_processes, output_dir='./', max_displacement=10.0):
 
