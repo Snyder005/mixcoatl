@@ -85,7 +85,7 @@ def crosstalk_model(coefficients, aggressor_array):
     model = crosstalk_signal*aggressor_array + tilty*Y + tiltx*X + bias
     return model
 
-def crosstalk_model_fit(aggressor_stamp, victim_stamp, num_iter=10, nsig=3.0, noise=7.0):
+def crosstalk_model_fit(aggressor_stamp, victim_stamp, num_iter=3, nsig=5.0, noise=7.0):
     """Perform a crosstalk model fit for given  aggressor and victim stamps."""
 
     coefficients = np.asarray([[0,0,0,0]])
