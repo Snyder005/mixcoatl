@@ -6,9 +6,10 @@ import glob
 from lsst.obs.lsst import LsstCamMapper as camMapper
 from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
 
+
 from mixcoatl.crosstalkTask import CrosstalkTask
 
-def main(sensor_id, main_dir, calib_dir, output_dir='./':
+def main(sensor_id, main_dir, calib_dir, output_dir='./'):
 
     camera = camMapper._makeCamera()
     lct = LsstCameraTransforms(camera)
@@ -54,9 +55,11 @@ if __name__ == '__main__':
     parser.add_argument('sensor_id', type=str)
     parser.add_argument('main_dir', type=str)
     parser.add_argument('calib_dir', type=str)
+    parser.add_argument('--output_dir', '-o', type=str, default='./')
     args = parser.parse_args()
 
-    main(args.sensor_id, args.main_dir, args.calib_dir)
+    main(args.sensor_id, args.main_dir, args.calib_dir,
+         output_dir=args.output_dir)
         
 
     

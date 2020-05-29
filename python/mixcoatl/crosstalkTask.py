@@ -12,11 +12,14 @@ from mixcoatl.crosstalk import CrosstalkMatrix
 
 class CrosstalkConfig(pexConfig.Config):
     
-    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, default=5.0)
-    num_iter = pexConfig.Field("Number of least square iterations", int, default=3)
+    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, 
+                           default=5.0)
+    num_iter = pexConfig.Field("Number of least square iterations", int, 
+                               default=3)
     threshold = pexConfig.Field("Aggressor spot mean signal threshold", float,
                                 default=40000.)
-    output_file = pexConfig.Field("Output filename", str, default='crosstalk_matrix.fits')
+    output_file = pexConfig.Field("Output filename", str, 
+                                  default='crosstalk_matrix.fits')
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
 
 class CrosstalkTask(pipeBase.Task):
@@ -40,8 +43,8 @@ class CrosstalkTask(pipeBase.Task):
         else:
             infiles2 = kwargs['infiles2']
             gains2 = kwargs['gains2']
-            bias_frame2 = bias_frame2['bias_frame2']
-            dark_frame2 = dark_frame2['dark_frame2']
+            bias_frame2 = kwargs['bias_frame2']
+            dark_frame2 = kwargs['dark_frame2']
         
         ccds1 = [MaskedCCD(infile, bias_frame=bias_frame1, 
                            dark_frame=dark_frame1) for infile in infiles1]
