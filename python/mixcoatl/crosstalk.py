@@ -5,7 +5,6 @@ To Do:
    * Make sure YAML file writing is working properly.
 """
 import numpy as np
-from scipy.ndimage.filters import gaussian_filter
 import lsst.eotest.image_utils as imutils
 from copy import deepcopy
 from astropy.io import fits
