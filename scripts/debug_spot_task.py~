@@ -1,0 +1,14 @@
+import argparse
+
+from mixcoatl.sourceGridTask import SourceGridTask
+
+def main():
+
+    
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+    args = parser.parse_args()
+
+    main()
