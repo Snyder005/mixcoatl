@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import os
+import time
 
 from mixcoatl.sourceGridTask import SourceGridTask
 

@@ -2,7 +2,7 @@
 
 To Do:
    * Change class references to grid distortions.
-   * Maybe add a dFlux term?
+   * Switch to masked arrays and masked columns
 """
 from __future__ import print_function
 from __future__ import absolute_import
@@ -14,70 +14,40 @@ from scipy import optimize
 from scipy.spatial import distance
 from itertools import product
 
-class GridDistortions:
-    """Handler class for grid displacement results."""
-    colnames = ['DX', 'DY', 'DXX', 'DYY', 'X', 'Y', 'XX', 'YY', 'FLUX']
+class BaseGrid:
 
-    def __init__(self, source_grid, nrows, ncols, data):
+    def __init__(self, ystep, xstep, theta, y0, x0, ncols, nrows):
+        """Initializes SourceGrid class with grid parameters."""
 
-        self.source_grid = source_grid
         self.nrows = nrows
         self.ncols = ncols
-        self.data = data
+        self.ystep = ystep
+        self.xstep = xstep
+        self.theta = theta
+        self.y0 = y0
+        self.x0 = x0
 
-    def __getitem__(self, column):
+    def make_ideal_grid(self):
 
-        return self.data[column]
-
-    @classmethod
-    def from_fits(self, infile):
-
-        with fits.open(infile) as hdulist:
-
-            x0 = hdulist[0].header['X0']
-            y0 = hdulist[0].header['Y0']
-            theta = hdulist[0].header['THETA']
-            xstep = hdulist[0].header['XSTEP']
-            ystep = hdulist[0].header['YSTEP']
-            ncols = hdulist[0].header['NCOLS']
-            nrows = hdulist[0].header['NROWS']
-            source_grid = SourceGrid(ystep, xstep, theta, y0, x0)
-
-            data = {}
-            for col in self.colnames:
-                data[col] = hdulist[1].data[col]
-
-        return cls(source_grid, nrows, ncols, data)
-
-    def mask_entries(self, l):
+        ## Create a standard nrows x ncols grid of points
+        y_array = np.asarray([n*self.ystep - (self.nrows-1)*self.ystep/2. \
+                                  for n in range(self.nrows)])
+        x_array = np.asarray([n*self.xstep - (self.ncols-1)*self.xstep/2. \
+                                  for n in range(self.ncols)])
+        Y, X = np.meshgrid(y_array, x_array)
         
-        ## Consider making this using astropy and masked arrays
-        bad_indices = np.hypot(self.data['DX'], self.data['DY']) >= l
-        self.data['DX'][bad_indices] = np.nan
-        self.data['DY'][bad_indices] = np.nan
-        self.data['DXX'][bad_indices] = np.nan
-        self.data['DYY'][bad_indices] = np.nan
-        self.data['FLUX'][bad_indices] = np.nan
-
-    def write_fits(self, outfile, **kwargs):
-
-        hdr = fits.Header()
-        hdr['X0'] = self.source_grid.x0
-        hdr['Y0'] = self.source_grid.y0
-        hdr['XSTEP'] = self.source_grid.xstep
-        hdr['YSTEP'] = self.source_grid.ystep
-        hdr['THETA'] = self.source_grid.theta
-        hdr['NCOLS'] = self.ncols
-        hdr['NROWS'] = self.nrows
-
-        columns = [fits.Column(col, array=self.data[col], format='D') for col in self.colnames]
+        ## Rotate grid using rotation matrix
+        Xr = np.cos(self.theta)*X - np.sin(self.theta)*Y
+        Yr = np.sin(self.theta)*X + np.cos(self.theta)*Y
         
-        prihdu = fits.PrimaryHDU(header=hdr)
-        tablehdu = fits.BinTableHDU.from_columns(columns)
-        hdulist = fits.PrimaryHDU([prihdu, tablehdu])
-        hdulist.writeto(outfile, **kwargs)
-
-class SourceGrid:
+        ## Move center of grid to desired x/y center coordinates
+        Xr += self.x0
+        Yr += self.y0
+        
+        ## Return the flattened arrays
+        return Yr.flatten(), Xr.flatten()        
+    
+class DistortedGrid(BaseGrid):
     """Infinite undistorted grid of points.
     
     Grid is defined by grid spacing in two orthogonal directions and 
@@ -90,141 +60,104 @@ class SourceGrid:
         y0 (float): Grid center y-position.
         x0 (float) Grid center x-position.:
     """
+
+    colnames = ['X', 'Y', 'DX', 'DY', 
+                'FLUX', 'DFLUX',
+                'XX', 'YY', 'DXX', 'DYY']
     
-    def __init__(self, ystep, xstep, theta, y0, x0):
+    def __init__(self, ystep, xstep, theta, y0, x0, ncols, nrows, data):
         """Initializes SourceGrid class with grid parameters."""
-        
-        self.ystep = ystep
-        self.xstep = xstep
-        self.theta = theta
-        self.y0 = y0
-        self.x0 = x0
-    
-    @classmethod
-    def from_source_catalog(cls, source_catalog, y0_guess=0.0, x0_guess=0.0, 
-                            y_kwd='base_SdssCentroid_y', 
-                            x_kwd='base_SdssCentroid_x', 
-                            ncols=49, nrows=49, 
-                            **kwargs):
-        """Generate a source grid model from a given source catalog.
-    
-        Args:
-            source_catalog: Source catalog table.
-            y0_guess (float): Initial grid center y0 guess.
-            x0_guess (float): Initial grid center x0 guess.
-            y_kwd (string): Y-position keyword for source catalog.
-            x_kwd (string): X-position keyword for source catalog.
-        
-        Returns:
-            SourceGrid object with grid parameters calculated from the input
-            source catalog.
-        """
-    
-        ## Get real-valued x/y coordinate arrays
-        srcY_raw = source_catalog[y_kwd]
-        srcX_raw = source_catalog[x_kwd]
-        srcY, srcX = remove_nan_coords(srcY_raw, srcX_raw)
-        nsources = srcY.shape[0] 
-        
-        ## Calculate median distance to 4 nearest neighbors
-        indices, distances = coordinate_distances(srcY, srcX, srcY, srcX)
-        nn_indices = indices[:, 1:5]
-        nn_distances = distances[: , 1:5]
-        med_dist = np.median(nn_distances)
-    
-        ## Result arrays (default is NaN)
-        dist1_array = np.full(nsources, np.nan)
-        dist2_array = np.full(nsources, np.nan)
-        theta_array = np.full(nsources, np.nan)
-    
-        ## Calculate grid rotation using 4 nearest neighbors
-        for i in range(nsources):
 
-            y = srcY[i]
-            x = srcX[i]
-        
-            for j in range(4):
-            
-                nn_dist = nn_distances[i, j] 
-                if np.abs(nn_dist  - med_dist) > 10.: continue                
-                y_nn = srcY[nn_indices[i, j]]
-                x_nn = srcX[nn_indices[i, j]]
-    
-                ## Use the nearest neighbor in Quadrant 1 (with respect to source)
-                if x_nn > x:
-                    if y_nn > y:
-                        dist1_array[i] = nn_dist
-                        theta_array[i] = np.arctan((y_nn-y)/(x_nn-x))
-                    else:
-                        dist2_array[i] = nn_dist
-                    
-        ## Mean over all sources (is nanmean needed?)
-        theta = np.nanmedian(theta_array)
-        if theta >= np.pi/4.:
-            theta = theta - (np.pi/2.)
-            xstep = np.nanmedian(dist2_array)
-            ystep = np.nanmedian(dist1_array)
+        super().__init__(ystep, xstep, theta, y0, x0, ncols, nrows)
+
+        self._data = {}
+        for col in self.colnames:
+            if data[col].shape[0] != ncols*nrows:
+                raise ValueError('{0} array size must be {1}'.format(col, ncols*nrows))
+            else:
+                self._data[col] = data[col]
+
+    def __getitem__(self, column):
+
+        return self._data[column]
+
+    def __setitem__(self, column, array):
+
+        if array.shape[0] != self.ncols*self.nrows:
+            raise ValueError('{0} array size must be {1}'.format(column, 
+                                                                 self.ncols*self.nrows))
         else:
-            xstep = np.nanmedian(dist1_array)
-            ystep = np.nanmedian(dist2_array)
-                
-        ## Constrained fit to determine grid center x0/y0
-        guess = cls.informed_guess(srcY, srcX, ystep, xstep, 
-                                   theta, y0_guess, x0_guess,
-                                   ncols=ncols, nrows=nrows)
-        bounds = [(ystep, ystep), 
-                  (xstep, xstep), 
-                  (theta, theta), 
-                  (None, None), 
-                  (None, None)]
-        
-        fit_results = scipy.optimize.minimize(grid_fit_error, guess, 
-                                              args=(srcY, srcX, ncols, nrows), 
-                                              method='SLSQP', bounds=bounds)    
+            self._data[column] = array
 
-        return cls(*fit_results.x)
-            
-    def make_grid(self, nrows=49, ncols=49):
+    @classmethod
+    def from_fits(cls, infile):
+
+        with fits.open(infile) as hdulist:
+
+            x0 = hdulist[0].header['X0']
+            y0 = hdulist[0].header['Y0']
+            theta = hdulist[0].header['THETA']
+            xstep = hdulist[0].header['XSTEP']
+            ystep = hdulist[0].header['YSTEP']
+            ncols = hdulist[0].header['NCOLS']
+            nrows = hdulist[0].header['NROWS']
+
+            data = {}
+            for col in cls.colnames:
+                data[col] = hdulist[1].data[col]
+
+        return cls(ystep, xstep, theta, y0, x0, nrows, ncols, data)
+
+    def get_source_coordinates(self, centered=False, distorted=True):
         """Create x/y coordinate arrays for (nrows x ncols) grid of sources."""
-        
-        ## Create a standard nrows x ncols grid of points
-        y_array = np.asarray([n*self.ystep - (nrows-1)*self.ystep/2. for n in range(nrows)])
-        x_array = np.asarray([n*self.xstep - (ncols-1)*self.xstep/2. for n in range(ncols)])
-        Y, X = np.meshgrid(y_array, x_array)
-        
-        ## Rotate grid using rotation matrix
-        Xr = np.cos(self.theta)*X - np.sin(self.theta)*Y
-        Yr = np.sin(self.theta)*X + np.cos(self.theta)*Y
-        
-        ## Move center of grid to desired x/y center coordinates
-        Xr += self.x0
-        Yr += self.y0
-        
-        ## Return the flattened arrays
-        return Yr.flatten(), Xr.flatten()
 
-    @staticmethod
-    def informed_guess(srcY, srcX, ystep, xstep, theta, y0_guess, x0_guess,
-                       ncols=49, nrows=49):
-        """Initial optimization of grid x0/y0."""
-
-        ## 3x3 grid around initial y0/x0 guess
-        y0s = [y0_guess - ystep/2., y0_guess, y0_guess + ystep/2.]
-        x0s = [x0_guess - xstep/2., x0_guess, x0_guess + xstep/2.]
-        err = np.inf
+        y = self['Y']
+        x = self['X']
         
-        ## Update guess with best result
-        for y0, x0 in product(y0s, x0s):
-            params = [ystep, xstep, theta, y0, x0]
-            new_err = grid_fit_error(params, srcY, srcX, ncols, nrows)
-            if new_err < err:
-                err = new_err
-                y0_guess = y0
-                x0_guess = x0
+        ## Optionally add distortions
+        if distorted:
+            y += self['DY']
+            x += self['DX']
 
-        return [ystep, xstep, theta, y0_guess, x0_guess]
+        ## Optionally center
+        if centered:
+            y -= self.y0
+            x -= self.x0
+
+        return y, x
+
+    def write_fits(self, outfile, **kwargs):
+
+        hdr = fits.Header()
+        hdr['X0'] = self.x0
+        hdr['Y0'] = self.y0
+        hdr['XSTEP'] = self.xstep
+        hdr['YSTEP'] = self.ystep
+        hdr['THETA'] = self.theta
+        hdr['NCOLS'] = self.ncols
+        hdr['NROWS'] = self.nrows
+
+        cols = [fits.Column(col, array=self[col], format='D') \
+                    for col in self.colnames]
+
+        prihdu = fits.PrimaryHDU(header=hdr)
+        tablehdu = fits.BinTableHDU.from_columns(cols)
+        hdulist = fits.HDUList([prihdu, tablehdu])
+        hdulist.writeto(outfile, **kwargs)
+
+def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     
-def grid_fit_error(params, srcY, srcX, nrows, ncols):
+    coords0 = np.stack([y0, x0], axis=1)
+    coords1 = np.stack([y1, x1], axis=1)
+    
+    ## Calculate distances to all points
+    distance_array = distance.cdist(coords0, coords1, metric=metric)
+    indices = np.argsort(distance_array, axis=1)
+    distances = np.sort(distance_array, axis=1)
+    
+    return indices, distances
+
+def fit_error(params, srcY, srcX, nrows, ncols, distortions=None):
     """Calculate sum of positional errors of true source grid and model grid.
     
     For every true source, the distance to the nearest neighbor source 
@@ -246,8 +179,15 @@ def grid_fit_error(params, srcY, srcX, nrows, ncols):
     dy, dx, theta, y0, x0 = params
     
     ## Create grid model and construct x/y coordinate arrays
-    grid = SourceGrid(dy, dx, theta, y0, x0)    
-    gY, gX = grid.make_grid(nrows=nrows, ncols=ncols)    
+    grid = BaseGrid(dy, dx, theta, y0, x0, ncols, nrows)    
+    gY, gX = grid.make_ideal_grid()
+    if distortions is not None:
+        dY, dX = distortions
+        dY[np.isnan(dY)] = 0.
+        dX[np.isnan(dX)] = 0.
+        gY += dY
+        gX += dX
+
     srcY, srcX = remove_nan_coords(srcY, srcX)   
 
     ## Calculate distances from each grid model source to nearest true source    
@@ -255,6 +195,74 @@ def grid_fit_error(params, srcY, srcX, nrows, ncols):
     nn_distances = distances[:, 0]
     
     return np.sqrt(np.mean(np.square(nn_distances)))
+    
+def grid_fit(srcY, srcX, ncols, nrows, y0_guess, x0_guess, distortions=None):
+
+    y, x = remove_nan_coords(srcY, srcX)
+    nsources = y.shape[0]
+
+    ## Calculate median distance to 4 nearest neighbors
+    indices, distances = coordinate_distances(y, x, y, x)
+    nn_indices = indices[:, 1:5]
+    nn_distances = distances[: , 1:5]
+    med_dist = np.median(nn_distances)
+
+    ## Arrays to hold results (default is NaN)
+    dist1_array = np.full(nsources, np.nan)
+    dist2_array = np.full(nsources, np.nan)
+    theta_array = np.full(nsources, np.nan)
+
+    ## Calculate grid rotation
+    for i in range(nsources):
+
+        ## For each source, get 4 nearest neighbors
+        yc = y[i]
+        xc = x[i]
+
+        for j in range(4):
+
+            nn_dist = nn_distances[i, j] 
+            if np.abs(nn_dist  - med_dist) > 10.: continue                
+            y_nn = y[nn_indices[i, j]]
+            x_nn = x[nn_indices[i, j]]
+
+            ## Use the nearest neighbor in Quadrant 1 (with respect to source)
+            if x_nn > xc:
+                if y_nn > yc:
+                    dist1_array[i] = nn_dist
+                    theta_array[i] = np.arctan((y_nn-yc)/(x_nn-xc))
+                else:
+                    dist2_array[i] = nn_dist
+
+    ## Take mean over all sources (ignoring NaN entries)
+    theta = np.nanmedian(theta_array)
+    if theta >= np.pi/4.:
+        theta = theta - (np.pi/2.)
+        xstep = np.nanmedian(dist2_array)
+        ystep = np.nanmedian(dist1_array)
+    else:
+        xstep = np.nanmedian(dist1_array)
+        ystep = np.nanmedian(dist2_array)
+
+    ## Informed guess
+    guess = informed_guess(y, x, ystep, xstep, theta, y0_guess, x0_guess,
+                           ncols=ncols, nrows=nrows, distortions=distortions)
+
+    ## Perform constrained fit to determine y0, x0
+    bounds = [(ystep, ystep), (xstep, xstep), (theta, theta),
+              (None, None), (None, None)]
+
+    r = scipy.optimize.minimize(fit_error, guess, 
+                                args=(y, x, ncols, nrows, distortions), 
+                                method='SLSQP', bounds=bounds)
+    y0 = r.x[3]
+    x0 = r.x[4]
+
+    ## Match catalog sources to grid sources
+    grid = BaseGrid(ystep, xstep, theta, y0, x0, 
+                    nrows, ncols)
+
+    return grid
 
 def remove_nan_coords(y, x):
     """Remove NaN entries for y/x position arrays.
@@ -267,43 +275,28 @@ def remove_nan_coords(y, x):
         Tuple of y/x positional arrays, removing any NaN 
         from the array.
     """
+
+    y_good = y[~np.isnan(y) & ~np.isnan(x)]
+    x_good = x[~np.isnan(y) & ~np.isnan(x)]
     
-    y_new = y[~np.isnan(y) & ~np.isnan(x)]
-    x_new = x[~np.isnan(y) & ~np.isnan(x)]
-    
-    return y_new, x_new
-    
-def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
-    
-    coords0 = np.stack([y0, x0], axis=1)
-    coords1 = np.stack([y1, x1], axis=1)
-    
-    ## Calculate distances to all points
-    distance_array = distance.cdist(coords0, coords1, metric=metric)
-    indices = np.argsort(distance_array, axis=1)
-    distances = np.sort(distance_array, axis=1)
-    
-    return indices, distances
-    
-def mask_by_ccd_geom(y, x, ccd_geometry):
-    """Mask out source positions outside of CCD boundaries.
-    
-    Args:
-        y (numpy.ndarray): Array of source y-positions.
-        x (numpy.ndarray): Array of source x-positions.
-        ccd_geometry (dict): Dictionary describing min/max CCD extent in x/y-directions.
-        
-    Returns:
-        Tuple of y/x positional arrays, removing entries outside
-        of CCD boundaries.
-    """
-    
-    min_y = ccd_geometry['min_y']
-    max_y = ccd_geometry['max_y']
-    min_x = ccd_geometry['min_x']
-    max_x = ccd_geometry['max_x']
-    
-    y_new = y[(min_y < y) & (y <= max_y) & (min_x < x) & (x <= max_x)]
-    x_new = x[(min_y < y) & (y <= max_y) & (min_x < x) & (x <= max_x)]
-    
-    return y_new, x_new
+    return y_good, x_good
+
+def informed_guess(srcY, srcX, ystep, xstep, theta, y0_guess, x0_guess,
+                   ncols=49, nrows=49, distortions=None):
+    """Initial optimization of grid x0/y0."""
+
+    ## 3x3 grid around initial y0/x0 guess
+    y0s = [y0_guess - ystep/2., y0_guess, y0_guess + ystep/2.]
+    x0s = [x0_guess - xstep/2., x0_guess, x0_guess + xstep/2.]
+    err = np.inf
+
+    ## Update guess with best result
+    for y0, x0 in product(y0s, x0s):
+        params = [ystep, xstep, theta, y0, x0]
+        new_err = fit_error(params, srcY, srcX, ncols, nrows, distortions)
+        if new_err < err:
+            err = new_err
+            y0_guess = y0
+            x0_guess = x0
+
+    return [ystep, xstep, theta, y0_guess, x0_guess]
