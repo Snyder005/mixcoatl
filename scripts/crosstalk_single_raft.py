@@ -55,7 +55,7 @@ def main(raft_id, main_dir, calib_dir, output_dir='./'):
 
             if i == 0:
                 output_file = os.path.join(output_dir, 
-                                           '{0}_{0}_crosstalk_matrix.fits'.format(sensor_id1))
+                                           '{0}_{1}_crosstalk_matrix.fits'.format(sensor_id1, sensor_id2))
                 crosstalk_task = CrosstalkTask()
                 crosstalk_task.config.output_file = output_file
                 crosstalk_task.run(sensor_id1, infiles1, gains1, 
