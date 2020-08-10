@@ -194,7 +194,7 @@ def fit_error(params, srcY, srcX, nrows, ncols, distortions=None):
     indices, distances = coordinate_distances(srcY, srcX, gY, gX)
     nn_distances = distances[:, 0]
     
-    return np.sqrt(np.mean(np.square(nn_distances)))
+    return np.mean(nn_distances)
     
 def grid_fit(srcY, srcX, ncols, nrows, y0_guess, x0_guess, distortions=None):
 
