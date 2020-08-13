@@ -280,7 +280,7 @@ def grid_fit_error(params, src_y, src_x, nrows, ncols):
     dy, dx, theta, y0, x0 = params
     
     ## Create grid model and construct x/y coordinate arrays
-    grid = SourceGrid(dy, dx, theta, y0, x0)    
+    grid = BaseGrid(dy, dx, theta, y0, x0)    
     grid_y, grid_x = grid.make_grid(nrows=nrows, ncols=ncols)    
     src_y, src_x = remove_nan_coords(src_y, src_x)   
 
