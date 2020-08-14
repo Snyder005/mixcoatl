@@ -1,8 +1,8 @@
 """Source grid fitting classes and functions.
 
 To Do:
-   * Implement lmfit
-   * Add more columns to the DistortedGrid object
+   * Change class references to grid distortions.
+   * Switch to masked arrays and masked columns
 """
 from __future__ import print_function
 from __future__ import absolute_import
@@ -10,7 +10,6 @@ import os
 import scipy
 import numpy as np
 from astropy.io import fits
-from lmfit import Parameters
 from scipy import optimize
 from scipy.spatial import distance
 from itertools import product
@@ -158,7 +157,7 @@ def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     
     return indices, distances
 
-def fit_error(params, srcY, srcX, nrows, ncols, distortions=None, pixel_extent=None):
+def fit_error(params, srcY, srcX, nrows, ncols, distortions=None):
     """Calculate sum of positional errors of true source grid and model grid.
     
     For every true source, the distance to the nearest neighbor source 
@@ -177,15 +176,10 @@ def fit_error(params, srcY, srcX, nrows, ncols, distortions=None, pixel_extent=N
     """
     
     ## Fit parameters
-    parvals = params.valuesdict()
-    ystep = parvals['ystep']
-    xstep = parvals['xstep']
-    theta = parvals['theta']
-    y0 = parvals['y0']
-    x0 = parvals['x0']
+    dy, dx, theta, y0, x0 = params
     
     ## Create grid model and construct x/y coordinate arrays
-    grid = BaseGrid(ystep, xstep, theta, y0, x0, ncols, nrows)    
+    grid = BaseGrid(dy, dx, theta, y0, x0, ncols, nrows)    
     gY, gX = grid.make_ideal_grid()
     if distortions is not None:
         dY, dX = distortions
@@ -194,12 +188,81 @@ def fit_error(params, srcY, srcX, nrows, ncols, distortions=None, pixel_extent=N
         gY += dY
         gX += dX
 
-    ## Add function to filter BaseGrid position vectors on CCD pixel extent
+    srcY, srcX = remove_nan_coords(srcY, srcX)   
 
     ## Calculate distances from each grid model source to nearest true source    
     indices, distances = coordinate_distances(srcY, srcX, gY, gX)
+    nn_distances = distances[:, 0]
     
-    return distances[:, 0]
+    return np.mean(nn_distances)
+    
+def grid_fit(srcY, srcX, ncols, nrows, y0_guess, x0_guess, distortions=None):
+
+    y, x = remove_nan_coords(srcY, srcX)
+    nsources = y.shape[0]
+
+    ## Calculate median distance to 4 nearest neighbors
+    indices, distances = coordinate_distances(y, x, y, x)
+    nn_indices = indices[:, 1:5]
+    nn_distances = distances[: , 1:5]
+    med_dist = np.median(nn_distances)
+
+    ## Arrays to hold results (default is NaN)
+    dist1_array = np.full(nsources, np.nan)
+    dist2_array = np.full(nsources, np.nan)
+    theta_array = np.full(nsources, np.nan)
+
+    ## Calculate grid rotation
+    for i in range(nsources):
+
+        ## For each source, get 4 nearest neighbors
+        yc = y[i]
+        xc = x[i]
+
+        for j in range(4):
+
+            nn_dist = nn_distances[i, j] 
+            if np.abs(nn_dist  - med_dist) > 10.: continue                
+            y_nn = y[nn_indices[i, j]]
+            x_nn = x[nn_indices[i, j]]
+
+            ## Use the nearest neighbor in Quadrant 1 (with respect to source)
+            if x_nn > xc:
+                if y_nn > yc:
+                    dist1_array[i] = nn_dist
+                    theta_array[i] = np.arctan((y_nn-yc)/(x_nn-xc))
+                else:
+                    dist2_array[i] = nn_dist
+
+    ## Take mean over all sources (ignoring NaN entries)
+    theta = np.nanmedian(theta_array)
+    if theta >= np.pi/4.:
+        theta = theta - (np.pi/2.)
+        xstep = np.nanmedian(dist2_array)
+        ystep = np.nanmedian(dist1_array)
+    else:
+        xstep = np.nanmedian(dist1_array)
+        ystep = np.nanmedian(dist2_array)
+
+    ## Informed guess
+    guess = informed_guess(y, x, ystep, xstep, theta, y0_guess, x0_guess,
+                           ncols=ncols, nrows=nrows, distortions=distortions)
+
+    ## Perform constrained fit to determine y0, x0
+    bounds = [(ystep, ystep), (xstep, xstep), (theta, theta),
+              (None, None), (None, None)]
+
+    r = scipy.optimize.minimize(fit_error, guess, 
+                                args=(y, x, ncols, nrows, distortions), 
+                                method='SLSQP', bounds=bounds)
+    y0 = r.x[3]
+    x0 = r.x[4]
+
+    ## Match catalog sources to grid sources
+    grid = BaseGrid(ystep, xstep, theta, y0, x0, 
+                    nrows, ncols)
+
+    return grid
 
 def remove_nan_coords(y, x):
     """Remove NaN entries for y/x position arrays.
@@ -229,16 +292,7 @@ def informed_guess(srcY, srcX, ystep, xstep, theta, y0_guess, x0_guess,
 
     ## Update guess with best result
     for y0, x0 in product(y0s, x0s):
-
-        params = Parameters()
-        params.add('ystep', value=ystep, vary=False)
-        params.add('xstep', value=xstep, vary=False)
-        params.add('theta', value=theta, vary=True)
-        params.add('y0', value=y0, min=y0-ystep/3., max=y0+ystep/3., 
-                   vary=True)
-        params.add('x0', value=x0, min=x0-xstep/3., max=x0+xstep/3., 
-                   vary=True)
-
+        params = [ystep, xstep, theta, y0, x0]
         new_err = fit_error(params, srcY, srcX, ncols, nrows, distortions)
         if new_err < err:
             err = new_err

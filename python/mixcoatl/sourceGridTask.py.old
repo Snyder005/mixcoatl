@@ -1,6 +1,7 @@
 import os
 import numpy as np
-from os.path import join
+from os.path import join, splitext
+import scipy
 from scipy.spatial import distance
 from astropy.io import fits
 
@@ -39,9 +40,8 @@ class SourceGridTask(pipeBase.Task):
     _DefaultName = "SourceGridTask"
 
     @pipeBase.timeMethod
-    def run(self, infile, optic_distortions_file=None):
+    def run(self, infile):
 
-        ## Obtain initial guess for grid center
         basename = os.path.basename(infile)
         projector_y = float(basename.split('_')[-1][:-5]) # camera x/y coords
         projector_x = float(basename.split('_')[-2][:-1])
@@ -52,90 +52,6 @@ class SourceGridTask(pipeBase.Task):
         y0_guess = ccd_y
 
         src = fits.getdata(infile)
-
-        ## Get source positions
-        srcY = src['base_SdssShape_X']
-        srcX = src['base_SdssShape_Y']
-
-        ## Curate data here (remove bad shapes, fluxes, etc.)
-        srcW = np.sqrt(np.square(src['base_SdssShape_XX']) + np.square(src['base_SdssShape_YY']))
-        mask = (srcW > 4.)
-
-        srcY = src['base_SdssShape_X'][mask]
-        srcX = src['base_SdssShape_Y'][mask]
-
-        ## Construct mask
-        nsources = srcY.shape[0]
-        indices, distances = coordinate_distances(srcY, srcX, srcY, srcX)
-        nn_indices = indices[:, 1:5]
-        nn_distances = distances[:, 1:5]
-        med_dist = np.median(nn_distances)
-
-        dist1_array = np.full(nsources, np.nan)
-        dist2_array = np.full(nsources, np.nan)
-        theta_array = np.full(nsources, np.nan)
-
-        for i in range(nsources):
-
-            yc = srcY[i]
-            xc = srcX[i]
-
-            for j in range(4):
-
-                nn_dist = nn_distances[i, j]
-                if np.abs(nn_dist - med_dist) > 10.: continue
-                y_nn = srcY[nn_indices[i, j]]
-                x_nn = srcX[nn_indices[i, j]]
-
-                if x_nn > xc:
-                    if y_nn > yc:
-                        dist1_array[i] = nn_dist
-                        theta_array[i] = np.arctan((y_nn-yc)/(x_nn-xc))
-                    else:
-                        dist2_array[i] = nn_dist
-
-        ## Use theta to determine x/y step direction
-        theta = np.nanmedian(theta_array)
-        if theta >= np.pi/4.:
-            theta = theta - (np.pi/2.)
-            xstep = np.nanmedian(dist2_array)
-            ystep = np.nanmedian(dist1_array)
-        else:
-            xstep = np.nanmedian(dist1_array)
-            ystep = np.nanmedian(dist2_array)
-
-        ## Optionally include optical distortions
-        if optic_distortions_file is not None:
-            pass # placeholder for now
-        else:
-            distortions = None
-
-        ## Define fit parameters
-        params = Parameters()
-        params.add('ystep', value=ystep, vary=False)
-        params.add('xstep', value=xstep, vary=False)
-        params.add('theta', value=theta, vary=False)
-        params.add('y0', value=y0_guess, min=y0_guess-ystep, max=y0_guess+ystep, vary=True, brute_step=ystep/4.)
-        params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, vary=True, brute_step=xstep/4.)
-        
-        ## Optionally perform initial brute search
-        brute = True # add to options
-        if brute:
-            params.add('y0', value=y0_guess, min=y0_guess-ystep, max=y0_guess+ystep, vary=True, brute_step=ystep/4.)
-            params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, vary=True, brute_step=xstep/4.)
-            minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows, distortions))
-            result = minner.minimize(method='brute', params=params)
-
-            params = result.params   
-
-        ## Enable parameter fit to theta
-        vary_theta = True # add to options
-        if vary_theta:
-            params['theta'].set(vary=True)
-
-        ## LM Fit
-        minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows, distortions))
-        result = minner.minimize(params=params)
         
         ## Get source information
         srcY = src[self.config.y_kwd]
@@ -144,14 +60,10 @@ class SourceGridTask(pipeBase.Task):
         srcYY = src[self.config.yy_kwd]
         srcF = src[self.config.flux_kwd]
 
-        ## Construct fitted grid
-        parvals = result.params.valuesdict()
-        grid = BaseGrid(parvals['ystep'], parvals['xstep'], parvals['theta'], parvals['y0'], parvals['x0'],
-                        ncols, nrows)
-
+        grid = grid_fit(srcY, srcX, self.config.ncols, self.config.nrows,
+                        y0_guess, x0_guess)
         gY, gX = grid.make_ideal_grid()
 
-        ## Match detected sources to fitted grid
         indices, distances = coordinate_distances(gY, gX, srcY, srcX)
         nn_indices = indices[:, 0]
 
