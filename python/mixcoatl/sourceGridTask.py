@@ -31,6 +31,10 @@ class SourceGridConfig(pexConfig.Config):
                              default='base_SdssShape_xx')
     flux_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
                                default='base_SdssShape_instFlux')
+    brute_search = pexConfig.Field("Perform prelim brute search", bool,
+                                   default=False)
+    vary_theta = pexConfig.Field("Vary theta parameter during fit", bool,
+                                 default=False)
     outfile = pexConfig.Field("Output filename", str, default="test.fits")
 
 class SourceGridTask(pipeBase.Task):
@@ -39,7 +43,7 @@ class SourceGridTask(pipeBase.Task):
     _DefaultName = "SourceGridTask"
 
     @pipeBase.timeMethod
-    def run(self, infile, optic_distortions_file=None):
+    def run(self, infile, ccd_type='ITL', optic_distortions_file=None):
 
         ## Obtain initial guess for grid center
         basename = os.path.basename(infile)
@@ -51,20 +55,30 @@ class SourceGridTask(pipeBase.Task):
         x0_guess = 2*509*4. - ccd_x
         y0_guess = ccd_y
 
+        ## Keywords for catalog
+        x_kwd = self.config.x_kwd
+        y_kwd = self.config.y_kwd
+        xx_kwd = self.config.xx_kwd
+        yy_kwd = self.config.yy_kwd
+        flux_kwd = self.config.flux_kwd
+
+        ## Get source positions for fit
         src = fits.getdata(infile)
 
-        ## Get source positions
-        srcY = src['base_SdssShape_X']
-        srcX = src['base_SdssShape_Y']
+        srcY = src[x_kwd]
+        srcX = src[y_kwd]
 
         ## Curate data here (remove bad shapes, fluxes, etc.)
-        srcW = np.sqrt(np.square(src['base_SdssShape_XX']) + np.square(src['base_SdssShape_YY']))
+        srcW = np.sqrt(np.square(src[xx_kwd]) + np.square(src[yy_kwd]))
         mask = (srcW > 4.)
 
-        srcY = src['base_SdssShape_X'][mask]
-        srcX = src['base_SdssShape_Y'][mask]
+        srcY = src[x_kwd][mask]
+        srcX = src[y_kwd][mask]
+        srcXX = src[xx_kwd][mask]
+        srcYY = src[yy_kwd][mask]
+        srcF = src[flux_kwd][mask]
 
-        ## Construct mask
+        ## Calculate mean xstep/ystep
         nsources = srcY.shape[0]
         indices, distances = coordinate_distances(srcY, srcX, srcY, srcX)
         nn_indices = indices[:, 1:5]
@@ -105,51 +119,49 @@ class SourceGridTask(pipeBase.Task):
             ystep = np.nanmedian(dist2_array)
 
         ## Optionally include optical distortions
-        if optic_distortions_file is not None:
+        if optic_shifts_file is not None:
             pass # placeholder for now
         else:
-            distortions = None
+            optic_shifts = None
 
         ## Define fit parameters
         params = Parameters()
         params.add('ystep', value=ystep, vary=False)
         params.add('xstep', value=xstep, vary=False)
         params.add('theta', value=theta, vary=False)
-        params.add('y0', value=y0_guess, min=y0_guess-ystep, max=y0_guess+ystep, vary=True, brute_step=ystep/4.)
-        params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, vary=True, brute_step=xstep/4.)
+        params.add('y0', value=y0_guess, min=y0_guess-ystep, max=y0_guess+ystep, 
+                   vary=True, brute_step=ystep/4.)
+        params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, 
+                   vary=True, brute_step=xstep/4.)
         
         ## Optionally perform initial brute search
-        brute = True # add to options
-        if brute:
-            params.add('y0', value=y0_guess, min=y0_guess-ystep, max=y0_guess+ystep, vary=True, brute_step=ystep/4.)
-            params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, vary=True, brute_step=xstep/4.)
-            minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows, distortions))
+        if self.config.brute_search:
+            params.add('y0', value=y0_guess, min=y0_guess-ystep, max=y0_guess+ystep, 
+                       vary=True, brute_step=ystep/4.)
+            params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, 
+                       vary=True, brute_step=xstep/4.)
+            minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
+                               fcn_kws={'optic_shifts' : optic_shifts})
             result = minner.minimize(method='brute', params=params)
 
             params = result.params   
 
-        ## Enable parameter fit to theta
-        vary_theta = True # add to options
-        if vary_theta:
+        ## Optionally enable parameter fit to theta
+        if self.config.vary_theta:
             params['theta'].set(vary=True)
 
         ## LM Fit
-        minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows, distortions))
+        minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
+                           fcn_kws={'optic_shifts' : optic_shifts})
         result = minner.minimize(params=params)
-        
-        ## Get source information
-        srcY = src[self.config.y_kwd]
-        srcX = src[self.config.x_kwd]
-        srcXX = src[self.config.xx_kwd]
-        srcYY = src[self.config.yy_kwd]
-        srcF = src[self.config.flux_kwd]
 
-        ## Construct fitted grid
+        ## Make best fit source grid
         parvals = result.params.valuesdict()
-        grid = BaseGrid(parvals['ystep'], parvals['xstep'], parvals['theta'], parvals['y0'], parvals['x0'],
-                        ncols, nrows)
+        grid = BaseGrid(parvals['ystep'], parvals['xstep'], parvals['theta'], 
+                        parvals['y0'], parvals['x0'],
+                        ncols, nrows, optic_shifts=optic_shifts)
 
-        gY, gX = grid.make_ideal_grid()
+        gY, gX = grid.make_source_grid()
 
         ## Match detected sources to fitted grid
         indices, distances = coordinate_distances(gY, gX, srcY, srcX)
@@ -162,8 +174,8 @@ class SourceGridTask(pipeBase.Task):
         yy_array = np.zeros(gY.shape[0])
         dxx_array = srcXX[nn_indices]
         dyy_array = srcYY[nn_indices]
-        flux_array = np.zeros(gX.shape[0])
-        dflux_array = srcF[nn_indices]
+        flux_array = srcF[nn_indices]
+        rflux_array = np.ones(gX.shape[0])
 
         ## Mask unmatched sources
         mask = np.hypot(dy_array, dx_array) >= self.config.max_displacement
@@ -171,9 +183,9 @@ class SourceGridTask(pipeBase.Task):
         dy_array[mask] = np.nan
         dxx_array[mask] = np.nan
         dyy_array[mask] = np.nan
-        dflux_array[mask] = np.nan
+        rflux_array[mask] = np.nan
 
-        ## Construct source information dictionary
+        ## Construct source properties dictionary
         data = {}
         data['X'] = gX
         data['Y'] = gY
@@ -188,7 +200,8 @@ class SourceGridTask(pipeBase.Task):
         data['FLUX'] = flux_array
         data['DFLUX'] = dflux_array
 
-        distorted_grid = DistortedGrid(grid.ystep, grid.xstep, grid.theta, 
-                                       grid.y0, grid.x0, self.config.ncols, 
-                                       self.config.nrows, data)
+        distorted_grid = DetectedGrid(grid.ystep, grid.xstep, grid.theta, 
+                                      grid.y0, grid.x0, self.config.ncols, 
+                                      self.config.nrows, data,
+                                      optic_shifts=optic_shifts)
         distorted_grid.write_fits(self.config.outfile, overwrite=True)

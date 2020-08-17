@@ -17,8 +17,8 @@ from itertools import product
 
 class BaseGrid:
 
-    def __init__(self, ystep, xstep, theta, y0, x0, ncols, nrows):
-        """Initializes SourceGrid class with grid parameters."""
+    def __init__(self, ystep, xstep, theta, y0, x0, ncols, nrows, 
+                 optic_shifts=None):
 
         self.nrows = nrows
         self.ncols = ncols
@@ -28,7 +28,24 @@ class BaseGrid:
         self.y0 = y0
         self.x0 = x0
 
-    def make_ideal_grid(self):
+        if optic_shifts is not None:
+            self.add_optic_shifts(optic_shifts)
+        else:
+            self.dy = np.zeros(nrows*ncols)
+            self.dx = np.zeros(nrows*ncols)
+
+    def add_optic_shifts(self, optic_shifts):
+
+        dy, dx = optic_shifts
+
+        nsources = self.nrows*self.ncols
+        if (dy.shape[0]==nsources)*(dx.shape[0]==sources):
+            self.dy = dy
+            self.dx = dx
+        else:
+            raise ValueError
+
+    def make_source_grid(self):
 
         ## Create a standard nrows x ncols grid of points
         y_array = np.asarray([n*self.ystep - (self.nrows-1)*self.ystep/2. \
@@ -44,12 +61,16 @@ class BaseGrid:
         ## Move center of grid to desired x/y center coordinates
         Xr += self.x0
         Yr += self.y0
+
+        ## Add optic shifts
+        Xr += self.dx
+        Yr += self.dy
         
         ## Return the flattened arrays
-        return Yr.flatten(), Xr.flatten()        
+        return Yr.flatten(), Xr.flatten() 
     
-class DistortedGrid(BaseGrid):
-    """Infinite undistorted grid of points.
+class DetectedGrid(BaseGrid):
+    """Grid of detected sources.
     
     Grid is defined by grid spacing in two orthogonal directions and 
     a rotation angle of the grid lines with respect to the x-axis.
@@ -63,13 +84,14 @@ class DistortedGrid(BaseGrid):
     """
 
     colnames = ['X', 'Y', 'DX', 'DY', 
-                'FLUX', 'DFLUX',
+                'FLUX', 'RFLUX',
                 'XX', 'YY', 'DXX', 'DYY']
     
-    def __init__(self, ystep, xstep, theta, y0, x0, ncols, nrows, data):
+    def __init__(self, ystep, xstep, theta, y0, x0, ncols, nrows, data,
+                 optic_shifts=None):
         """Initializes SourceGrid class with grid parameters."""
 
-        super().__init__(ystep, xstep, theta, y0, x0, ncols, nrows)
+        super().__init__(ystep, xstep, theta, y0, x0, ncols, nrows, optic_shifts)
 
         self._data = {}
         for col in self.colnames:
@@ -103,32 +125,20 @@ class DistortedGrid(BaseGrid):
             ncols = hdulist[0].header['NCOLS']
             nrows = hdulist[0].header['NROWS']
 
+            dy = hdulist[1].data['OPTIC_DY']
+            dx = hdulist[1].data['OPTIC_DX']
+            optic_shifts = (dy, dx)
+
             data = {}
             for col in cls.colnames:
-                data[col] = hdulist[1].data[col]
+                data[col] = hdulist[2].data[col]
 
-        return cls(ystep, xstep, theta, y0, x0, nrows, ncols, data)
-
-    def get_source_coordinates(self, centered=False, distorted=True):
-        """Create x/y coordinate arrays for (nrows x ncols) grid of sources."""
-
-        y = self['Y']
-        x = self['X']
-        
-        ## Optionally add distortions
-        if distorted:
-            y += self['DY']
-            x += self['DX']
-
-        ## Optionally center
-        if centered:
-            y -= self.y0
-            x -= self.x0
-
-        return y, x
+        return cls(ystep, xstep, theta, y0, x0, nrows, ncols, data, 
+                   optic_shifts=optic_shifts)
 
     def write_fits(self, outfile, **kwargs):
 
+        ## Primary HDU with projected grid information
         hdr = fits.Header()
         hdr['X0'] = self.x0
         hdr['Y0'] = self.y0
@@ -137,13 +147,19 @@ class DistortedGrid(BaseGrid):
         hdr['THETA'] = self.theta
         hdr['NCOLS'] = self.ncols
         hdr['NROWS'] = self.nrows
-
-        cols = [fits.Column(col, array=self[col], format='D') \
-                    for col in self.colnames]
-
         prihdu = fits.PrimaryHDU(header=hdr)
-        tablehdu = fits.BinTableHDU.from_columns(cols)
-        hdulist = fits.HDUList([prihdu, tablehdu])
+
+        ## Optic shifts HDU
+        optic_cols = [fits.Column('OPTIC_DY', array=self.dy, format='D'),
+                      fits.Column('OPTIC_DX', array=self.dx, format='D')]
+        optic_tablehdu = fits.BinTableHDU.from_columns(optic_cols)
+
+        ## Source properties HDU
+        source_cols = [fits.Column(col, array=self[col], format='D') \
+                           for col in self.colnames]
+
+        source_tablehdu = fits.BinTableHDU.from_columns(source_cols)
+        hdulist = fits.HDUList([prihdu, optic_tablehdu, source_tablehdu])
         hdulist.writeto(outfile, **kwargs)
 
 def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
@@ -158,7 +174,7 @@ def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     
     return indices, distances
 
-def fit_error(params, srcY, srcX, nrows, ncols, distortions=None, pixel_extent=None):
+def fit_error(params, srcY, srcX, nrows, ncols, optic_shifts=None, pixel_extent=None):
     """Calculate sum of positional errors of true source grid and model grid.
     
     For every true source, the distance to the nearest neighbor source 
@@ -185,14 +201,9 @@ def fit_error(params, srcY, srcX, nrows, ncols, distortions=None, pixel_extent=N
     x0 = parvals['x0']
     
     ## Create grid model and construct x/y coordinate arrays
-    grid = BaseGrid(ystep, xstep, theta, y0, x0, ncols, nrows)    
-    gY, gX = grid.make_ideal_grid()
-    if distortions is not None:
-        dY, dX = distortions
-        dY[np.isnan(dY)] = 0.
-        dX[np.isnan(dX)] = 0.
-        gY += dY
-        gX += dX
+    grid = BaseGrid(ystep, xstep, theta, y0, x0, ncols, nrows,
+                    optic_shifts=optic_shifts)    
+    gY, gX = grid.make_source_grid()
 
     ## Add function to filter BaseGrid position vectors on CCD pixel extent
 
@@ -200,49 +211,3 @@ def fit_error(params, srcY, srcX, nrows, ncols, distortions=None, pixel_extent=N
     indices, distances = coordinate_distances(srcY, srcX, gY, gX)
     
     return distances[:, 0]
-
-def remove_nan_coords(y, x):
-    """Remove NaN entries for y/x position arrays.
-    
-    Args:
-        y: Array of source y-positions.
-        x: Array of source x-positions.
-        
-    Returns:
-        Tuple of y/x positional arrays, removing any NaN 
-        from the array.
-    """
-
-    y_good = y[~np.isnan(y) & ~np.isnan(x)]
-    x_good = x[~np.isnan(y) & ~np.isnan(x)]
-    
-    return y_good, x_good
-
-def informed_guess(srcY, srcX, ystep, xstep, theta, y0_guess, x0_guess,
-                   ncols=49, nrows=49, distortions=None):
-    """Initial optimization of grid x0/y0."""
-
-    ## 3x3 grid around initial y0/x0 guess
-    y0s = [y0_guess - ystep/2., y0_guess, y0_guess + ystep/2.]
-    x0s = [x0_guess - xstep/2., x0_guess, x0_guess + xstep/2.]
-    err = np.inf
-
-    ## Update guess with best result
-    for y0, x0 in product(y0s, x0s):
-
-        params = Parameters()
-        params.add('ystep', value=ystep, vary=False)
-        params.add('xstep', value=xstep, vary=False)
-        params.add('theta', value=theta, vary=True)
-        params.add('y0', value=y0, min=y0-ystep/3., max=y0+ystep/3., 
-                   vary=True)
-        params.add('x0', value=x0, min=x0-xstep/3., max=x0+xstep/3., 
-                   vary=True)
-
-        new_err = fit_error(params, srcY, srcX, ncols, nrows, distortions)
-        if new_err < err:
-            err = new_err
-            y0_guess = y0
-            x0_guess = x0
-
-    return [ystep, xstep, theta, y0_guess, x0_guess]
