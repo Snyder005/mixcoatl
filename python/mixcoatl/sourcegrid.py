@@ -55,8 +55,8 @@ class BaseGrid:
         Y, X = np.meshgrid(y_array, x_array)
         
         ## Rotate grid using rotation matrix
-        Xr = np.cos(self.theta)*X - np.sin(self.theta)*Y
-        Yr = np.sin(self.theta)*X + np.cos(self.theta)*Y
+        Xr = (np.cos(self.theta)*X - np.sin(self.theta)*Y).flatten()
+        Yr = (np.sin(self.theta)*X + np.cos(self.theta)*Y).flatten()
         
         ## Move center of grid to desired x/y center coordinates
         Xr += self.x0
@@ -67,7 +67,7 @@ class BaseGrid:
         Yr += self.dy
         
         ## Return the flattened arrays
-        return Yr.flatten(), Xr.flatten() 
+        return Yr, Xr
     
 class DetectedGrid(BaseGrid):
     """Grid of detected sources.
@@ -174,7 +174,7 @@ def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     
     return indices, distances
 
-def fit_error(params, srcY, srcX, nrows, ncols, optic_shifts=None, pixel_extent=None):
+def fit_error(params, srcY, srcX, nrows, ncols, optic_shifts=None, ccd_geom=None):
     """Calculate sum of positional errors of true source grid and model grid.
     
     For every true source, the distance to the nearest neighbor source 
@@ -206,6 +206,15 @@ def fit_error(params, srcY, srcX, nrows, ncols, optic_shifts=None, pixel_extent=
     gY, gX = grid.make_source_grid()
 
     ## Add function to filter BaseGrid position vectors on CCD pixel extent
+    if ccd_geom is not None:
+        ymin = 0
+        ymax = ccd_geom.ny*2
+        xmin = 0 
+        xmax = ccd.geom.nx*8
+
+        mask = (gY < ymax)*(gX < ymax)
+        gY = gY[mask]
+        gX = gX[mask]
 
     ## Calculate distances from each grid model source to nearest true source    
     indices, distances = coordinate_distances(srcY, srcX, gY, gX)

@@ -3,13 +3,15 @@ import numpy as np
 from os.path import join
 from scipy.spatial import distance
 from astropy.io import fits
+from lmfit import Minimizer, Parameters
 
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 from lsst.obs.lsst import LsstCamMapper as camMapper
 from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
 
-from .sourcegrid import BaseGrid, DistortedGrid, grid_fit, coordinate_distances
+from .sourcegrid import BaseGrid, DetectedGrid, fit_error, coordinate_distances
+from .utils import ITL_AMP_GEOM, E2V_AMP_GEOM
 
 camera = camMapper._makeCamera()
 lct = LsstCameraTransforms(camera)
@@ -43,7 +45,7 @@ class SourceGridTask(pipeBase.Task):
     _DefaultName = "SourceGridTask"
 
     @pipeBase.timeMethod
-    def run(self, infile, ccd_type='ITL', optic_distortions_file=None):
+    def run(self, infile, ccd_type=None, optic_shifts_file=None):
 
         ## Obtain initial guess for grid center
         basename = os.path.basename(infile)
@@ -62,6 +64,14 @@ class SourceGridTask(pipeBase.Task):
         yy_kwd = self.config.yy_kwd
         flux_kwd = self.config.flux_kwd
 
+        ## Get CCD geometry
+        if ccd_type == 'ITL':
+            ccd_geom = ITL_AMP_GEOM
+        elif ccd_type == 'E2V':
+            ccd_geom = E2V_AMP_GEOM
+        else:
+            ccd_geom = None
+
         ## Get source positions for fit
         src = fits.getdata(infile)
 
@@ -72,8 +82,8 @@ class SourceGridTask(pipeBase.Task):
         srcW = np.sqrt(np.square(src[xx_kwd]) + np.square(src[yy_kwd]))
         mask = (srcW > 4.)
 
-        srcY = src[x_kwd][mask]
-        srcX = src[y_kwd][mask]
+        srcY = src[y_kwd][mask]
+        srcX = src[x_kwd][mask]
         srcXX = src[xx_kwd][mask]
         srcYY = src[yy_kwd][mask]
         srcF = src[flux_kwd][mask]
@@ -135,13 +145,17 @@ class SourceGridTask(pipeBase.Task):
                    vary=True, brute_step=xstep/4.)
         
         ## Optionally perform initial brute search
+        ncols = self.config.ncols
+        nrows = self.config.nrows
+
         if self.config.brute_search:
             params.add('y0', value=y0_guess, min=y0_guess-ystep, max=y0_guess+ystep, 
                        vary=True, brute_step=ystep/4.)
             params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, 
                        vary=True, brute_step=xstep/4.)
             minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
-                               fcn_kws={'optic_shifts' : optic_shifts})
+                               fcn_kws={'optic_shifts' : optic_shifts,
+                                        'ccd_geom' : ccd_geom})
             result = minner.minimize(method='brute', params=params)
 
             params = result.params   
@@ -152,7 +166,8 @@ class SourceGridTask(pipeBase.Task):
 
         ## LM Fit
         minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
-                           fcn_kws={'optic_shifts' : optic_shifts})
+                           fcn_kws={'optic_shifts' : optic_shifts.
+                                    'ccd_geom' : ccd_geom})
         result = minner.minimize(params=params)
 
         ## Make best fit source grid
@@ -198,10 +213,12 @@ class SourceGridTask(pipeBase.Task):
         data['DYY'] = dyy_array
 
         data['FLUX'] = flux_array
-        data['DFLUX'] = dflux_array
+        data['RFLUX'] = rflux_array
 
-        distorted_grid = DetectedGrid(grid.ystep, grid.xstep, grid.theta, 
+        detected_grid = DetectedGrid(grid.ystep, grid.xstep, grid.theta, 
                                       grid.y0, grid.x0, self.config.ncols, 
                                       self.config.nrows, data,
                                       optic_shifts=optic_shifts)
-        distorted_grid.write_fits(self.config.outfile, overwrite=True)
+        detected_grid.write_fits(self.config.outfile, overwrite=True)
+
+        return detected_grid #debug
