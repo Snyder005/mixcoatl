@@ -7,14 +7,9 @@ from lmfit import Minimizer, Parameters
 
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
-from lsst.obs.lsst import LsstCamMapper as camMapper
-from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
 
 from .sourcegrid import BaseGrid, DetectedGrid, fit_error, coordinate_distances
 from .utils import ITL_AMP_GEOM, E2V_AMP_GEOM
-
-camera = camMapper._makeCamera()
-lct = LsstCameraTransforms(camera)
 
 class SourceGridConfig(pexConfig.Config):
     """Configuration for GridFitTask."""
@@ -45,17 +40,10 @@ class SourceGridTask(pipeBase.Task):
     _DefaultName = "SourceGridTask"
 
     @pipeBase.timeMethod
-    def run(self, infile, ccd_type=None, optic_shifts_file=None):
+    def run(self, infile, grid_center_guess, ccd_type=None, 
+            optic_shifts_file=None):
 
-        ## Obtain initial guess for grid center
-        basename = os.path.basename(infile)
-        projector_y = float(basename.split('_')[-1][:-5]) # camera x/y coords
-        projector_x = float(basename.split('_')[-2][:-1])
-
-        ccd_name, ccd_x, ccd_y = lct.focalMmToCcdPixel(projector_y, projector_x)
-
-        x0_guess = 2*509*4. - ccd_x
-        y0_guess = ccd_y
+        y0_guess, x0_guess = grid_center_guess
 
         ## Keywords for catalog
         x_kwd = self.config.x_kwd
@@ -139,10 +127,6 @@ class SourceGridTask(pipeBase.Task):
         params.add('ystep', value=ystep, vary=False)
         params.add('xstep', value=xstep, vary=False)
         params.add('theta', value=theta, vary=False)
-        params.add('y0', value=y0_guess, min=y0_guess-ystep, max=y0_guess+ystep, 
-                   vary=True, brute_step=ystep/4.)
-        params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, 
-                   vary=True, brute_step=xstep/4.)
         
         ## Optionally perform initial brute search
         ncols = self.config.ncols
@@ -157,8 +141,14 @@ class SourceGridTask(pipeBase.Task):
                                fcn_kws={'optic_shifts' : optic_shifts,
                                         'ccd_geom' : ccd_geom})
             result = minner.minimize(method='brute', params=params)
-
-            params = result.params   
+            params = result.params
+            params['y0'].set(min=y0_guess-ystep/3., max=y0_guess+ystep/3.)
+            params['x0'].set(min=x0_guess-xstep/3., max=x0_guess+xstep/3.)
+        else:
+            params.add('y0', value=y0_guess, min=y0_guess-ystep/3., max=y0_guess+ystep/3., 
+                       vary=True)
+            params.add('x0', value=x0_guess, min=x0_guess-xstep/3., max=x0_guess+xstep/3., 
+                       vary=True)
 
         ## Optionally enable parameter fit to theta
         if self.config.vary_theta:
@@ -166,8 +156,9 @@ class SourceGridTask(pipeBase.Task):
 
         ## LM Fit
         minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
-                           fcn_kws={'optic_shifts' : optic_shifts.
-                                    'ccd_geom' : ccd_geom})
+                           fcn_kws={'optic_shifts' : optic_shifts,
+                                    'ccd_geom' : ccd_geom},
+                           nan_policy='omit')
         result = minner.minimize(params=params)
 
         ## Make best fit source grid

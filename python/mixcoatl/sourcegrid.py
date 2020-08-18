@@ -210,13 +210,16 @@ def fit_error(params, srcY, srcX, nrows, ncols, optic_shifts=None, ccd_geom=None
         ymin = 0
         ymax = ccd_geom.ny*2
         xmin = 0 
-        xmax = ccd.geom.nx*8
+        xmax = ccd_geom.nx*8
 
-        mask = (gY < ymax)*(gX < ymax)
+        mask = (gY < ymax)*(gY > ymin)*(gX < xmax)*(gX > xmin)
         gY = gY[mask]
         gX = gX[mask]
 
     ## Calculate distances from each grid model source to nearest true source    
     indices, distances = coordinate_distances(srcY, srcX, gY, gX)
-    
-    return distances[:, 0]
+
+    if srcY.shape[0] < gY.shape[0]:
+        return distances[:, 0] + (gY.shape[0]-srcY.shape[0])*xstep
+    else:
+        return distances[:, 0]
