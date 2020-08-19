@@ -81,8 +81,8 @@ class DistortedGrid:
         dy, dx = centroid_shifts
 
         ## Rotate and normalize centroid_shifts
-        norm_dx = (np.cos(-self.theta)*dx - np.sin(-self.theta)*dy)/self.ystep
-        norm_dy = (np.sin(-self.theta)*dx + np.cos(-self.theta)*dy)/self.xstep
+        norm_dx = (np.cos(-self.theta)*dx - np.sin(-self.theta)*dy)/self.xstep
+        norm_dy = (np.sin(-self.theta)*dx + np.cos(-self.theta)*dy)/self.ystep
 
         self.add_normalized_shifts((norm_dy, norm_dx))
 
@@ -108,6 +108,14 @@ class DistortedGrid:
 
         self._y = y.flatten()
         self._x = x.flatten()
+
+    def get_centroid_shifts(self):
+        """Return the centroid shifts given the grid geometry."""
+
+        dx = (np.cos(self.theta)*self.norm_dx - np.sin(self.theta)*self.norm_dy)*self.xstep
+        dy = (np.sin(self.theta)*self.norm_dx + np.cos(self.theta)*self.norm_dy)*self.ystep
+
+        return dy, dx
 
     def get_source_centroids(self, distorted=True):
         """Return source centroids given the grid geometry."""
