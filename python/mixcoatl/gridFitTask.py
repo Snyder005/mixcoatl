@@ -74,25 +74,28 @@ class GridFitTask(pipeBase.Task):
         srcYY = src[yy_kwd][mask]
         srcF = src[flux_kwd][mask]
 
-        ## Optionally get existing distortions
-        if optics_grid_files is not None:
+        ## Optionally get existing normalized centroid shifts
+        if optics_grid_file is not None:
             optics_grid = DistortedGrid.from_fits(optics_grid_file)
-            centroid_shifts = (optics_grid.dy, optics_grid.dx)
+            normalized_shifts = (optics_grid.norm_dy, optics_grid.norm_dx)
         else:
-            centroid_shifts = None
+            normalized_shifts = None
 
         ## Perform grid fit
         ncols = self.config.ncols
         nrows = self.config.nrows
         result = grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
                           brute_search=self.config.brute_search,
-                          vary_theta=self.vary_theta,
-                          centroid_shifts=centroid_shifts)
+                          vary_theta=self.config.vary_theta,
+                          normalized_shifts=normalized_shifts,
+                          ccd_geom=ccd_geom)
 
         ## Make best fit source grid
         parvals = result.params.valuesdict()
         grid = DistortedGrid(parvals['ystep'], parvals['xstep'], parvals['theta'], 
                         parvals['y0'], parvals['x0'],
-                        ncols, nrows, optic_shifts=optic_shifts)
+                        ncols, nrows, normalized_shifts=normalized_shifts)
 
-        return grid
+        grid.write_fits(self.config.outfile, overwrite=True)
+
+        return grid, result

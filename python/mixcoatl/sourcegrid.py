@@ -1,8 +1,9 @@
 """Source grid fitting classes and functions.
 
 To Do:
-   * Implement lmfit
-   * Add more columns to the DistortedGrid object
+   * Implement new MatchedCatalog functionality
+   * Maybe add getter/setter functionality for grid parameters
+     that automatically updates centroids if changed.
 """
 from __future__ import print_function
 from __future__ import absolute_import
@@ -18,7 +19,7 @@ from itertools import product
 class DistortedGrid:
 
     def __init__(self, ystep, xstep, theta, y0, x0, ncols, nrows, 
-                 centroids=None, centroid_shifts=None):
+                 normalized_shifts=None):
 
         ## Ideal grid parameters
         self.nrows = nrows
@@ -29,25 +30,18 @@ class DistortedGrid:
         self.y0 = y0
         self.x0 = x0
 
-        ## Add centroid shifts
-        if centroid_shifts is None:
-            self._dy = np.zeros(nrows*ncols)
-            self._dx = np.zeros(nrows*ncols)
-        else:
-            self.add_centroid_shifts(centroid_shifts)
+        self.make_source_grid()
 
-        ## Add centroids
-        if centroids is None:
-            y, x = self.make_source_grid(distorted=False)
-            self._y = gY
-            self._x = gX
+        ## Add centroid shifts
+        if normalized_shifts is None:
+            self._norm_dy = np.zeros(nrows*ncols)
+            self._norm_dx = np.zeros(nrows*ncols)
         else:
-            y, x = centroids
-            self._y = y
-            self._x = x
+            self.add_normalized_shifts(normalized_shifts)
 
     @classmethod
     def from_fits(cls, infile):
+        """Initialize DistortedGrid instance from a FITS file."""
 
         with fits.open(infile) as hdulist:
 
@@ -59,21 +53,19 @@ class DistortedGrid:
             ncols = hdulist[0].header['NCOLS']
             nrows = hdulist[0].header['NROWS']
 
-            y = hdulist[1].data['SOURCE_Y']
-            x = hdulist[1].data['SOURCE_X']
-            dy = hdulist[1].data['SOURCE_DY']
-            dx = hdulist[1].data['SOURCE_DX']
+            norm_dy = hdulist[1].data['NORMALIZED_DY']
+            norm_dx = hdulist[1].data['NORMALIZED_DX']
 
         return cls(ystep, xstep, theta, y0, x0, nrows, ncols, 
-                   centroids=(y, x), centroid_shifts=(dy, dx))
+                   normalized_shifts=(norm_dy, norm_dx))
     
     @property
-    def dx(self):
-        return self._dx
+    def norm_dx(self):
+        return self._norm_dx
 
     @property
-    def dy(self):
-        return self._dy
+    def norm_dy(self):
+        return self._norm_dy
 
     @property
     def x(self):
@@ -84,40 +76,63 @@ class DistortedGrid:
         return self._y
 
     def add_centroid_shifts(self, centroid_shifts):
+        """Calculate and add the normalized source centroid shifts."""
 
         dy, dx = centroid_shifts
+
+        ## Rotate and normalize centroid_shifts
+        norm_dx = (np.cos(-self.theta)*dx - np.sin(-self.theta)*dy)/self.ystep
+        norm_dy = (np.sin(-self.theta)*dx + np.cos(-self.theta)*dy)/self.xstep
+
+        self.add_normalized_shifts((norm_dy, norm_dx))
+
+    def add_normalized_shifts(self, normalized_shifts):
+        """Add the normalized source centroid shifts."""
+
+        norm_dy, norm_dx = normalized_shifts
         nsources = self.nrows*self.ncols
 
-        if (dy.shape[0]==nsources)*(dx.shape[0]==nsources):
-            self._dy = dy
-            self._dx = dx
+        if (norm_dy.shape[0]==nsources)*(norm_dx.shape[0]==nsources):
+            self._norm_dy = norm_dy
+            self._norm_dx = norm_dx
 
-    def make_source_grid(self, distorted=True):
+    def make_source_grid(self):
+        """Make rectilinear grid of sources."""
 
         ## Create a standard nrows x ncols grid of points
         y_array = np.asarray([n*self.ystep - (self.nrows-1)*self.ystep/2. \
                                   for n in range(self.nrows)])
         x_array = np.asarray([n*self.xstep - (self.ncols-1)*self.xstep/2. \
                                   for n in range(self.ncols)])
-        Y, X = np.meshgrid(y_array, x_array)
+        y, x = np.meshgrid(y_array, x_array)
+
+        self._y = y.flatten()
+        self._x = x.flatten()
+
+    def get_source_centroids(self, distorted=True):
+        """Return source centroids given the grid geometry."""
+
+        ## Add scaled centroid shifts
+        if distorted:
+            y = self.y + self.norm_dy*self.ystep
+            x = self.x + self.norm_dx*self.xstep
+        else:
+            y = self.y
+            x = self.x
         
         ## Rotate grid using rotation matrix
-        Xr = (np.cos(self.theta)*X - np.sin(self.theta)*Y).flatten()
-        Yr = (np.sin(self.theta)*X + np.cos(self.theta)*Y).flatten()
+        xr = (np.cos(self.theta)*x - np.sin(self.theta)*y).flatten()
+        yr = (np.sin(self.theta)*x + np.cos(self.theta)*y).flatten()
         
         ## Move center of grid to desired x/y center coordinates
-        Xr += self.x0
-        Yr += self.y0
-
-        ## Add centroid shifts
-        if distorted:
-            Xr += self.dx
-            Yr += self.dy
+        xr += self.x0
+        yr += self.y0
         
         ## Return the flattened arrays
-        return Yr, Xr
+        return yr, xr
 
     def write_fits(self, outfile, **kwargs):
+        """Write DistortedGrid instance to a FITS file."""
 
         ## Primary HDU with projected grid information
         hdr = fits.Header()
@@ -131,10 +146,8 @@ class DistortedGrid:
         prihdu = fits.PrimaryHDU(header=hdr)
 
         ## Optic shifts HDU
-        optic_cols = [fits.Column('SOURCE_Y', array=self.y, format='D'),
-                      fits.Column('SOURCE_X', array=self.x, format='D'),
-                      fits.Column('SOURCE_DY', array=self.dy, format='D'),
-                      fits.Column('SOURCE_DX', array=self.dx, format='D')]
+        optic_cols = [fits.Column('NORMALIZED_DY', array=self.norm_dy, format='D'),
+                      fits.Column('NORMALIZED_DX', array=self.norm_dx, format='D')]
         optic_tablehdu = fits.BinTableHDU.from_columns(optic_cols)
 
         hdulist = fits.HDUList([prihdu, optic_tablehdu])
@@ -159,7 +172,8 @@ def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     
     return indices, distances
 
-def fit_error(params, srcY, srcX, nrows, ncols, centroid_shifts=None, ccd_geom=None):
+def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None, 
+              ccd_geom=None):
     """Calculate sum of positional errors of true source grid and model grid.
     
     For every true source, the distance to the nearest neighbor source 
@@ -187,8 +201,8 @@ def fit_error(params, srcY, srcX, nrows, ncols, centroid_shifts=None, ccd_geom=N
     
     ## Create grid model and construct x/y coordinate arrays
     grid = DistortedGrid(ystep, xstep, theta, y0, x0, ncols, nrows,
-                         centroid_shifts=centroid_shifts)    
-    gY, gX = grid.make_source_grid()
+                         normalized_shifts=normalized_shifts)    
+    gY, gX = grid.get_source_centroids()
 
     ## Filter source grid positions according to CCD geometry
     if ccd_geom is not None:
@@ -211,7 +225,8 @@ def fit_error(params, srcY, srcX, nrows, ncols, centroid_shifts=None, ccd_geom=N
         return distances[:, 0]
 
 def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
-             brute_search=False, vary_theta=False, centroid_shifts=None):
+             brute_search=False, vary_theta=False, 
+             normalized_shifts=None, ccd_geom=None):
 
     ## Calculate mean xstep/ystep
     nsources = srcY.shape[0]
@@ -266,8 +281,9 @@ def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
         params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, 
                    vary=True, brute_step=xstep/4.)
         minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
-                           fcn_kws={'centroid_shifts' : centroid_shifts,
-                                    'ccd_geom' : ccd_geom})
+                           fcn_kws={'normalized_shifts' : normalized_shifts,
+                                    'ccd_geom' : ccd_geom},
+                           nan_policy='omit')
         result = minner.minimize(method='brute', params=params)
         params = result.params
         params['y0'].set(min=y0_guess-ystep/3., max=y0_guess+ystep/3.)
@@ -286,7 +302,7 @@ def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
 
     ## LM Fit
     minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
-                       fcn_kws={'centroid_shifts' : centroid_shifts,
+                       fcn_kws={'normalized_shifts' : normalized_shifts,
                                 'ccd_geom' : ccd_geom},
                        nan_policy='omit')
     result = minner.minimize(params=params)
