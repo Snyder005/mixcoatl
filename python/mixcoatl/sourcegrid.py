@@ -315,7 +315,7 @@ def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
 
     ## Optionally enable parameter fit to theta
     if vary_theta:
-        params['theta'].set(vary=True)
+        params['theta'].set(vary=True, min=theta-5*np.pi/180., max=theta+5*np.pi/180.)
 
     ## LM Fit
     minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
