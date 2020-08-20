@@ -17,9 +17,9 @@ class GridFitConfig(pexConfig.Config):
     nrows = pexConfig.Field("Number of grid rows.", int, default=49)
     ncols = pexConfig.Field("Number of grid columns.", int, default=49)
     y_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                            default='base_SdssShape_y')
+                            default='base_SdssCentroid_y')
     x_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                            default='base_SdssShape_x')
+                            default='base_SdssCentroid_x')
     yy_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
                              default='base_SdssShape_yy')
     xx_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
@@ -30,7 +30,7 @@ class GridFitConfig(pexConfig.Config):
                                    default=False)
     vary_theta = pexConfig.Field("Vary theta parameter during fit", bool,
                                  default=False)
-    outfile = pexConfig.Field("Output filename", str, default="test.fits")
+    outfile = pexConfig.Field("Output filename", str, default="test.cat")
 
 class GridFitTask(pipeBase.Task):
 
@@ -59,43 +59,67 @@ class GridFitTask(pipeBase.Task):
             ccd_geom = None
 
         ## Get source positions for fit
-        src = fits.getdata(infile)
+        with fits.open(infile) as src:
 
-        srcY = src[x_kwd]
-        srcX = src[y_kwd]
+            all_srcY = src[1].data[x_kwd]
+            all_srcX = src[1].data[y_kwd]
 
-        ## Curate data here (remove bad shapes, fluxes, etc.)
-        srcW = np.sqrt(np.square(src[xx_kwd]) + np.square(src[yy_kwd]))
-        mask = (srcW > 4.)
+            ## Curate data here (remove bad shapes, fluxes, etc.)
+            all_srcW = np.sqrt(np.square(src[1].data[xx_kwd]) + \
+                                   np.square(src[1].data[yy_kwd]))
+            mask = (all_srcW > 4.)
 
-        srcY = src[y_kwd][mask]
-        srcX = src[x_kwd][mask]
-        srcXX = src[xx_kwd][mask]
-        srcYY = src[yy_kwd][mask]
-        srcF = src[flux_kwd][mask]
+            srcY = all_srcY[mask]
+            srcX = all_srcX[mask]
 
-        ## Optionally get existing normalized centroid shifts
-        if optics_grid_file is not None:
-            optics_grid = DistortedGrid.from_fits(optics_grid_file)
-            normalized_shifts = (optics_grid.norm_dy, optics_grid.norm_dx)
-        else:
-            normalized_shifts = None
+            ## Optionally get existing normalized centroid shifts
+            if optics_grid_file is not None:
+                optics_grid = DistortedGrid.from_fits(optics_grid_file)
+                normalized_shifts = (optics_grid.norm_dy, optics_grid.norm_dx)
+            else:
+                normalized_shifts = None
 
-        ## Perform grid fit
-        ncols = self.config.ncols
-        nrows = self.config.nrows
-        result = grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
-                          brute_search=self.config.brute_search,
-                          vary_theta=self.config.vary_theta,
-                          normalized_shifts=normalized_shifts,
-                          ccd_geom=ccd_geom)
+            ## Perform grid fit
+            ncols = self.config.ncols
+            nrows = self.config.nrows
+            result = grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
+                              brute_search=self.config.brute_search,
+                              vary_theta=self.config.vary_theta,
+                              normalized_shifts=normalized_shifts,
+                              ccd_geom=ccd_geom)
 
-        ## Make best fit source grid
-        parvals = result.params.valuesdict()
-        grid = DistortedGrid(parvals['ystep'], parvals['xstep'], parvals['theta'], 
-                        parvals['y0'], parvals['x0'],
-                        ncols, nrows, normalized_shifts=normalized_shifts)
+            ## Make best fit source grid
+            parvals = result.params.valuesdict()
+            grid = DistortedGrid(parvals['ystep'], parvals['xstep'], 
+                                 parvals['theta'], parvals['y0'], 
+                                 parvals['x0'], ncols, nrows, 
+                                 normalized_shifts=normalized_shifts)
 
-        grid.write_fits(self.config.outfile, overwrite=True)
+            ## Update the catalog
+            gY, gX = grid.get_source_centroids()
+
+            indices, dist = coordinate_distances(gY, gX, all_srcY, all_srcX)
+            nn_indices = indices[:, 0]
+            grid_index = np.full(all_srcX.shape[0], np.nan)
+            grid_y = np.full(all_srcX.shape[0], np.nan)
+            grid_x = np.full(all_srcX.shape[0], np.nan)
+
+            grid_y[nn_indices] = gY
+            grid_x[nn_indices] = gX
+            grid_index[nn_indices] = np.arange(49*49)
+
+            new_cols = fits.ColDefs([fits.Column(name='spotgrid_index', 
+                                                 format='D', array=grid_index),
+                                     fits.Column(name='spotgrid_x', 
+                                                 format='D', array=grid_x),
+                                     fits.Column(name='spotgrid_y', 
+                                                 format='D', array=grid_y)])
+
+            cols = src[1].columns
+
+            new_hdu = fits.BinTableHDU.from_columns(cols+new_cols)
+
+            src[1] = new_hdu
+            src.writeto(outfile, overwrite=True)
 
         return grid, result
