@@ -6,26 +6,18 @@ from astropy.io import fits
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 
-from .sourcegrid import DistortedGrid, grid_fit
+from .sourcegrid import DistortedGrid, grid_fit, coordinate_distances
 from .utils import ITL_AMP_GEOM, E2V_AMP_GEOM
 
 class GridFitConfig(pexConfig.Config):
     """Configuration for GridFitTask."""
 
-    max_displacement = pexConfig.Field("Maximum distance [pix] between matched sources.",
-                                       float, default=10.)
     nrows = pexConfig.Field("Number of grid rows.", int, default=49)
     ncols = pexConfig.Field("Number of grid columns.", int, default=49)
     y_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                            default='base_SdssCentroid_y')
+                            default='base_SdssCentroid_Y')
     x_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                            default='base_SdssCentroid_x')
-    yy_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                             default='base_SdssShape_yy')
-    xx_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                             default='base_SdssShape_xx')
-    flux_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                               default='base_SdssShape_instFlux')
+                            default='base_SdssCentroid_X')
     brute_search = pexConfig.Field("Perform prelim brute search", bool,
                                    default=False)
     vary_theta = pexConfig.Field("Vary theta parameter during fit", bool,
@@ -46,9 +38,8 @@ class GridFitTask(pipeBase.Task):
         ## Keywords for catalog
         x_kwd = self.config.x_kwd
         y_kwd = self.config.y_kwd
-        xx_kwd = self.config.xx_kwd
-        yy_kwd = self.config.yy_kwd
-        flux_kwd = self.config.flux_kwd
+        xx_kwd = 'base_SdssShape_XX'
+        yy_kwd = 'base_SdssShape_YY'
 
         ## Get CCD geometry
         if ccd_type == 'ITL':
@@ -61,8 +52,8 @@ class GridFitTask(pipeBase.Task):
         ## Get source positions for fit
         with fits.open(infile) as src:
 
-            all_srcY = src[1].data[x_kwd]
-            all_srcX = src[1].data[y_kwd]
+            all_srcY = src[1].data[y_kwd]
+            all_srcX = src[1].data[x_kwd]
 
             ## Curate data here (remove bad shapes, fluxes, etc.)
             all_srcW = np.sqrt(np.square(src[1].data[xx_kwd]) + \
@@ -95,31 +86,33 @@ class GridFitTask(pipeBase.Task):
                                  parvals['x0'], ncols, nrows, 
                                  normalized_shifts=normalized_shifts)
 
-            ## Update the catalog
+            ## Match grid to catalog
             gY, gX = grid.get_source_centroids()
-
             indices, dist = coordinate_distances(gY, gX, all_srcY, all_srcX)
             nn_indices = indices[:, 0]
+
+            ## Populate grid information
             grid_index = np.full(all_srcX.shape[0], np.nan)
             grid_y = np.full(all_srcX.shape[0], np.nan)
             grid_x = np.full(all_srcX.shape[0], np.nan)
-
             grid_y[nn_indices] = gY
             grid_x[nn_indices] = gX
             grid_index[nn_indices] = np.arange(49*49)
 
+            ## Merge tables
             new_cols = fits.ColDefs([fits.Column(name='spotgrid_index', 
                                                  format='D', array=grid_index),
                                      fits.Column(name='spotgrid_x', 
                                                  format='D', array=grid_x),
                                      fits.Column(name='spotgrid_y', 
                                                  format='D', array=grid_y)])
-
             cols = src[1].columns
-
             new_hdu = fits.BinTableHDU.from_columns(cols+new_cols)
-
             src[1] = new_hdu
-            src.writeto(outfile, overwrite=True)
+
+            ## Append grid HDU
+            grid_hdu = grid.make_grid_hdu()
+            src.append(grid_hdu)
+            src.writeto(self.config.outfile, overwrite=True)
 
         return grid, result

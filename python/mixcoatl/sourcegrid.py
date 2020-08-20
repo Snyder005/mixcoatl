@@ -45,16 +45,16 @@ class DistortedGrid:
 
         with fits.open(infile) as hdulist:
 
-            x0 = hdulist[0].header['X0']
-            y0 = hdulist[0].header['Y0']
-            theta = hdulist[0].header['THETA']
-            xstep = hdulist[0].header['XSTEP']
-            ystep = hdulist[0].header['YSTEP']
-            ncols = hdulist[0].header['NCOLS']
-            nrows = hdulist[0].header['NROWS']
+            x0 = hdulist['GRID_INFO'].header['X0']
+            y0 = hdulist['GRID_INFO'].header['Y0']
+            theta = hdulist['GRID_INFO'].header['THETA']
+            xstep = hdulist['GRID_INFO'].header['XSTEP']
+            ystep = hdulist['GRID_INFO'].header['YSTEP']
+            ncols = hdulist['GRID_INFO'].header['NCOLS']
+            nrows = hdulist['GRID_INFO'].header['NROWS']
 
-            norm_dy = hdulist[1].data['NORMALIZED_DY']
-            norm_dx = hdulist[1].data['NORMALIZED_DX']
+            norm_dy = hdulist['GRID_INFO'].data['NORMALIZED_DY']
+            norm_dx = hdulist['GRID_INFO'].data['NORMALIZED_DX']
 
         return cls(ystep, xstep, theta, y0, x0, nrows, ncols, 
                    normalized_shifts=(norm_dy, norm_dx))
@@ -95,6 +95,26 @@ class DistortedGrid:
         if (norm_dy.shape[0]==nsources)*(norm_dx.shape[0]==nsources):
             self._norm_dy = norm_dy
             self._norm_dx = norm_dx
+
+    def make_grid_hdu(self):
+        """Create an HDU with grid information."""
+
+        hdr = fits.Header()
+        hdr['X0'] = self.x0
+        hdr['Y0'] = self.y0
+        hdr['XSTEP'] = self.xstep
+        hdr['YSTEP'] = self.ystep
+        hdr['THETA'] = self.theta
+        hdr['NCOLS'] = self.ncols
+        hdr['NROWS'] = self.nrows
+
+        ## Optic shifts HDU
+        cols = [fits.Column('NORMALIZED_DY', array=self.norm_dy, format='D'),
+                fits.Column('NORMALIZED_DX', array=self.norm_dx, format='D')]
+        tablehdu = fits.BinTableHDU.from_columns(cols, header=hdr,
+                                                 name='GRID_INFO')
+
+        return tablehdu
 
     def make_source_grid(self):
         """Make rectilinear grid of sources."""
@@ -142,23 +162,12 @@ class DistortedGrid:
     def write_fits(self, outfile, **kwargs):
         """Write DistortedGrid instance to a FITS file."""
 
-        ## Primary HDU with projected grid information
+        ## Write grid HDU with minimal PrimaryHDU
         hdr = fits.Header()
-        hdr['X0'] = self.x0
-        hdr['Y0'] = self.y0
-        hdr['XSTEP'] = self.xstep
-        hdr['YSTEP'] = self.ystep
-        hdr['THETA'] = self.theta
-        hdr['NCOLS'] = self.ncols
-        hdr['NROWS'] = self.nrows
         prihdu = fits.PrimaryHDU(header=hdr)
+        tablehdu = self.make_grid_hdu()
+        hdulist = fits.HDUList([prihdu, tablehdu])
 
-        ## Optic shifts HDU
-        optic_cols = [fits.Column('NORMALIZED_DY', array=self.norm_dy, format='D'),
-                      fits.Column('NORMALIZED_DX', array=self.norm_dx, format='D')]
-        optic_tablehdu = fits.BinTableHDU.from_columns(optic_cols)
-
-        hdulist = fits.HDUList([prihdu, optic_tablehdu])
         hdulist.writeto(outfile, **kwargs)
 
 class MatchedCatalog:
