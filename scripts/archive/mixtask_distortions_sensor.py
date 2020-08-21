@@ -12,9 +12,6 @@ def main(infiles, output_dir='./', ncols=49, nrows=49):
     theta_all = np.zeros(len(infiles))
     norm_dx_all = np.zeros((len(infiles), ncols*nrows))
     norm_dy_all = np.zeros((len(infiles), ncols*nrows))
-    dxx_all = np.zeros((len(infiles), ncols*nrows))
-    dyy_all = np.zeros((len(infiles), ncols*nrows))
-    dflux_all = np.zeros((len(infiles), ncols*nrows))
 
     for i, infile in enumerate(infiles):
 
@@ -22,7 +19,7 @@ def main(infiles, output_dir='./', ncols=49, nrows=49):
 
         ## Normalize source astrometric shifts
         rotated_dx = (np.cos(-1*grid.theta)*grid['DX'] - np.sin(-1*grid.theta)*grid['DY'])
-        rotated_dy = (np.cos(-1*grid.theta)*grid['DY'] - np.sin(-1*grid.theta)*grid['DX'])
+        rotated_dy = (np.cos(-1*grid.theta)*grid['DY'] + np.sin(-1*grid.theta)*grid['DX'])
 
         norm_dx_all[i, :] = rotated_dx/grid.xstep
         norm_dy_all[i, :] = rotated_dy/grid.ystep
@@ -99,30 +96,6 @@ def main(infiles, output_dir='./', ncols=49, nrows=49):
                                 0., 0., ncols, nrows, data)
     optics_grid.write_fits(os.path.join(output_dir, 'optical_distortion_grid.fits'), 
                            overwrite=True)
-
-    ## Subtract mean dy/dx from original grids
-    for i, infile, in enumerate(infiles):
-
-        grid = DistortedGrid.from_fits(infile)
-
-        mean_dx = np.cos(grid.theta)*mean_norm_dx - np.sin(grid.theta)*mean_norm_dy
-        mean_dy = np.cos(grid.theta)*mean_norm_dy + np.sin(grid.theta)*mean_norm_dx
-                                                          
-        grid['X'] += mean_dx
-        grid['Y'] += mean_dy
-        grid['DX'] -= mean_dx
-        grid['DY'] -= mean_dy
-        grid['XX'] = mean_dxx
-        grid['YY'] = mean_dyy
-        grid['DXX'] -= mean_dxx
-        grid['DYY'] -= mean_dyy
-        grid['FLUX'] = mean_dflux
-        grid['DFLUX'] -= mean_dflux
-
-        basename = os.path.basename(infile)
-        outfile = os.path.join(output_dir, basename.replace('distorted_grid', 
-                                                            'corrected_distorted_grid'))
-        grid.write_fits(outfile, overwrite=True)
 
 if __name__ == '__main__':
 
