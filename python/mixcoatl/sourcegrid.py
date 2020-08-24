@@ -237,7 +237,7 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
 
     ## Scale if grid is offset by row/column
     if srcY.shape[0] < gY.shape[0]:
-        return distances[:, 0] + (gY.shape[0]-srcY.shape[0])*xstep
+        return distances[:, 0] + (xstep+ystep)/2.
     else:
         return distances[:, 0]
 
