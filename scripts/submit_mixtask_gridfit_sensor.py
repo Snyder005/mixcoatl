@@ -53,7 +53,7 @@ if __name__ == '__main__':
     parser.add_argument('--optics_grid_file', type=str, default=None,
                         help='FITS or CAT file with optic shifts.')
     parser.add_argument('--output_dir', '-o', type=str, default=None,
-                        help='Output directory for data products.')
+                        help='Output directory for analysis products.')
     parser.add_argument('--vary_theta', action='store_true',
                         help='Flag to enable theta variation during fit.')
     args = parser.parse_args()
