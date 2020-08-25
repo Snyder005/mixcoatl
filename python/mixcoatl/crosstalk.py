@@ -37,19 +37,19 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, num_iter=3, nsig=5.0, noise=7.0
 
     params = np.asarray([0, 0, 0, 0])
     victim_imarr = np.ma.masked_invalid(victim_stamp)
-    mask = np.ma.getmask(victim_array)
+    mask = np.ma.getmask(victim_imarr)
 
     for i in range(num_iter):
 
         ## Mask outliers using residual
         model = np.ma.masked_where(mask, crosstalk_model(params, aggressor_stamp))
         
-        residual = victim_array - model
+        residual = victim_imarr - model
         res_mean = residual.mean()
         res_std = residual.std()
-        victim_array = np.ma.masked_where(np.abs(residual - res_mean) \
+        victim_imarr = np.ma.masked_where(np.abs(residual - res_mean) \
                                               > nsig*res_std, victim_stamp)
-        mask = np.ma.getmask(victim_array)
+        mask = np.ma.getmask(victim_imarr)
 
         ## Construct masked, compressed basis arrays
         ay, ax = aggressor_stamp.shape
@@ -57,15 +57,14 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, num_iter=3, nsig=5.0, noise=7.0
         Y, X = np.mgrid[:ay, :ax]
         Y = np.ma.masked_where(mask, Y).compressed()
         X = np.ma.masked_where(mask, X).compressed()
-        aggressor_array = np.ma.masked_where(mask, aggressor_stamp).compressed()
+        aggressor_imarr = np.ma.masked_where(mask, aggressor_stamp).compressed()
 
         ## Perform least squares parameter estimation
-        b = victim_array.compressed()/noise
-        A = np.vstack([aggressor_array, Z, Y, X]).T/noise
+        b = victim_imarr.compressed()/noise
+        A = np.vstack([aggressor_imarr, Z, Y, X]).T/noise
         params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
         covar = np.linalg.inv(np.dot(A.T, A))
         dof = b.shape[0] - 4
-        print(params.shape)
 
     return np.concatenate((params, np.sqrt(covar.diagonal()), res, [dof]))
 
@@ -73,7 +72,7 @@ class CrosstalkMatrix():
 
     keys = ['XTALK', 'OFFSET_Z', 'TILT_Y', 'TILT_X',
             'SIGMA_XTALK', 'SIGMA_Z', 'SIGMA_Y', 'SIGMA_X',
-            'RESIDUALS', 'DOF']
+            'RESIDUAL', 'DOF']
 
     def __init__(self, aggressor_id, matrix=None, victim_id=None, namps=16):
 
@@ -100,6 +99,7 @@ class CrosstalkMatrix():
             victim_id = hdulist[0].header['VICTIM']
             namps = hdulist[0].header['NAMPS']
 
+            matrix = np.full((10, namps, namps), np.nan)
             for i, key in enumerate(cls.keys):
                 matrix[i, :, :] = hdulist[key].data
 
@@ -108,8 +108,8 @@ class CrosstalkMatrix():
     def set_row(self, aggressor_amp, row_results):
         """Set matrix row from results dictionary."""
 
-        for victim_amp in row.keys():
-            self.matrix[:, aggress_amp-1, victim_amp-1] = row_results[victim_amp]
+        for victim_amp in row_results.keys():
+            self.matrix[:, aggressor_amp-1, victim_amp-1] = row_results[victim_amp]
 
     def write_fits(self, outfile, **kwargs):
         """Write crosstalk results to FITS file."""

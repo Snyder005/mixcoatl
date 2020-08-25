@@ -16,8 +16,8 @@ class CrosstalkConfig(pexConfig.Config):
                                default=3)
     threshold = pexConfig.Field("Aggressor spot mean signal threshold", float,
                                 default=40000.)
-    output_file = pexConfig.Field("Output filename", str, 
-                                  default='crosstalk_matrix.fits')
+    outfile = pexConfig.Field("Output filename", str, 
+                              default='crosstalk_matrix.fits')
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
 
 class CrosstalkTask(pipeBase.Task):
@@ -50,14 +50,12 @@ class CrosstalkTask(pipeBase.Task):
 
         ## Create new matrix or modify existing
         if crosstalk_matrix_file is not None:
-            crosstalk_matrix = CrosstalkMatrix(sensor_id1, victim_id=sensor_id2,
-                                               filename=crosstalk_matrix_file,
-                                               namps=len(all_amps))
+            crosstalk_matrix = CrosstalkMatrix.from_fits(crosstalk_matrix_file)
             outfile = crosstalk_matrix_file
         else:
-            outfile = self.config.outfile
             crosstalk_matrix = CrosstalkMatrix(sensor_id1, victim_id=sensor_id2,
                                                namps=len(all_amps))
+            outfile = self.config.outfile
 
         num_aggressors = 0
 
@@ -87,5 +85,5 @@ class CrosstalkTask(pipeBase.Task):
                 crosstalk_matrix.set_row(i, row)
                 if num_aggressors == 4: break
 
-        crosstalk_matrix.write_fits(outfile)
+        crosstalk_matrix.write_fits(outfile, overwrite=True)
    
