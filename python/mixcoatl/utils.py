@@ -15,7 +15,7 @@ E2V_AMP_GEOM = AmplifierGeometry(prescan=10, nx=512, ny=2002,
 """AmplifierGeometry: Amplifier geometry parameters for LSST E2V CCD sensors."""
 
 def calibrated_stack(infiles, outfile, bias_frame=None, dark_frame=None, 
-                     linearity_correction=None. bitpix=32):
+                     linearity_correction=None, bitpix=32):
 
     ccds = [MaskedCCD(infile, bias_frame=bias_frame, 
                       dark_frame=dark_frame, 
@@ -26,6 +26,6 @@ def calibrated_stack(infiles, outfile, bias_frame=None, dark_frame=None,
     amp_images = {}
     for amp in all_amps:
         amp_ims = [ccd.unbiased_and_trimmed_image(amp) for ccd in ccds]
-        amp_images[amp] = stack(amp_ims).getImage()
+        amp_images[amp] = imutils.stack(amp_ims).getImage()
 
-    imutils.writeFits(amp_imges, outfile, infiles[0], bitpix=bitpix)
+    imutils.writeFits(amp_images, outfile, infiles[0], bitpix=bitpix)

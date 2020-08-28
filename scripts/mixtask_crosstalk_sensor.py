@@ -1,56 +1,55 @@
-#!/usr/bin/env python
+#!/usr/env/bin python
 import argparse
+import glob
 import os
-import pickle
+from os.path import join, basename, isdir
 
 from lsst.obs.lsst import LsstCamMapper as camMapper
 from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
 
 from mixcoatl.crosstalkTask import CrosstalkTask
 
-def main(sensor_id, infiles, gain_file=None, bias_frame=None, dark_frame=None, 
-         output_dir='./'):
+def main(sensor_id, main_dir, calib_dir, output_dir='./'):
 
-    gain_results = pickle.load(gain_file, 'rb')
+    gain_results = pickle.load(open(join(calib_dir, 
+                                         'et_results.pkl'), 'rb'))
     gains = gain_results.get_amp_gains(sensor_id)
 
-    outfile = os.path.join(output_dir,
-                           '{0}_{0}_crosstalk_matrix.fits'.format(sensor_id))
+    ## Get projector positions and exptimes
+    position_set = set()
+    exptime_set = set()
+    camera = camMapper._makeCamera()
+    lct = LsstCameraTransforms(camera)
 
-    for i, infile in infiles:
+    subdir_list = [x.path for x in os.scandir(main_dir) if isdir(x.path)]
+    for subdir in subdir_list:
 
-        if i == 0:
-            crosstalk_task = CrosstalkTask()
-            crosstalk_task.config.outfile = outfile
-            crosstalk_task.run(sensor_id, infiles[0], gains, bias_frame=bias_frame,
-                               dark_frame=dark_frame)
-        else:
-            crosstalk_task = CrosstalkTask()
-            crosstalk_task.run(sensor_id, infiles[0], gains, bias_frame=bias_frame,
-                               dark_frame=dark_frame, crosstalk_matrix_file=outfile)
+        base = basename(subdir)
+        if "xtalk" not in basename: continue
+        xpos, ypos, exptime = base.split('_')[-4:-2]
+        central_sensor, ccdX, ccdY = lct.focalMmToCcdPixel(float(ypos), float(xpos))
+        if central_sensor == sensor_id:
+            position_set.add((xpos, ypos))
+            exptime_set.add(exptime)
 
-if __name_ == '__main__':
+    ## For each exptime calculate crosstalk
+    for exptime in exptime_set:
 
-    parser = argparse.ArgumentParser("Run CrosstalkTask on a single sensor.")
-    parser.add_argument('sensor_id', type=str,
-                        help='CCD identifier (e.g. R22_S11)')
-    parser.add_argument('infiles', nargs='+',
-                        help='Input crosstalk image files.')
-    parser.add_argument('--gain_file', '-g', type=str, default=None,
-                        help='PKL file with CCD gain results.')
-    parser.add_argument('--bias_frame', '-b', type=str, default=None,
-                        help='FITS image of bias frame.')
-    parser.add_argument('--dark_frame', '-d', type=str, default=None,
-                        help='FITS image of dark frame.')
-    parser.add_argument('--output_dir', '-o', type=str, default='./',
-                        help='Output directory for analysis products.')
-    args = parser.parse_args()
+        outfile = join(output_dir, '{0}_{0}_{1}_crosstalk_matrix.fits'.format(sensor_id,
+                                                                              exptime))
 
-    main(args.sensor_id, args.infiles, gain_file=args.gain_file,
-         bias_frame=args.bias_frame, dark_frame=args.dark_frame,
-         output_dir=args.output_dir)
-                        
+        ## Get calibrated crosstalk infiles
+        infiles = []
+        for i, pos in enumerate(position_set):
+            xpos, ypos = pos
+            infile = glob.glob(join(main_dir, 
+                                    '*{0}_{1}_{2}*'.format(xpos, ypos, exptime),
+                                    '*{0}_calibrated.fits'.format(sensor_id)))
+            infiles.append(infile)
 
+        ## Run crosstalk task
+        crosstalk_task = CrosstalkTask()
+        crosstalk_task.config.outfile = outfile
+        crosstalk_task.run(sensor_id, infiles, gains)
 
-            
-    
+        
