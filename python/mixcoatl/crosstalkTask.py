@@ -19,7 +19,7 @@ class CrosstalkConfig(pexConfig.Config):
     outfile = pexConfig.Field("Output filename", str, 
                               default='crosstalk_matrix.fits')
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
-    aggressors_per_image = pexconfig.Field("Number of aggressors per image",
+    aggressors_per_image = pexConfig.Field("Number of aggressors per image",
                                            int, default=4)
 
 class CrosstalkTask(pipeBase.Task):
@@ -47,7 +47,7 @@ class CrosstalkTask(pipeBase.Task):
 
         infiles_list = [(infiles1[i], infiles2[i]) for i in range(len(infiles1))]
         
-        all_amps = imutils.allAmps(infile1)
+        all_amps = imutils.allAmps(infiles1[0])
 
         ## Create new matrix or modify existing
         if crosstalk_matrix_file is not None:
@@ -62,6 +62,8 @@ class CrosstalkTask(pipeBase.Task):
             ccd1 = MaskedCCD(infile1, bias_frame=bias_frame1, dark_frame=dark_frame1)
             ccd2 = MaskedCCD(infile2, bias_frame=bias_frame2, dark_frame=dark_frame2)      
             num_aggressors = 0
+
+            print(infile1)
 
             ## Search each amp for aggressor
             for i in all_amps:

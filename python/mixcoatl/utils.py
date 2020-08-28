@@ -25,7 +25,7 @@ def calibrated_stack(infiles, outfile, bias_frame=None, dark_frame=None,
 
     amp_images = {}
     for amp in all_amps:
-        amp_ims = [ccd.unbiased_and_trimmed_image(amp) for ccd in ccds]
+        amp_ims = [ccd.bias_subtracted_image(amp) for ccd in ccds]
         amp_images[amp] = imutils.stack(amp_ims).getImage()
 
     imutils.writeFits(amp_images, outfile, infiles[0], bitpix=bitpix)
