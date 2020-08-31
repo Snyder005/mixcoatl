@@ -1,193 +1,143 @@
-"""
-Analysis tasks for crosstalk.
-
-To Do:
-   * Make sure YAML file writing is working properly.
-"""
 import numpy as np
-import lsst.eotest.image_utils as imutils
-from copy import deepcopy
 from astropy.io import fits
-
-import lsst.afw.math as afwMath
-from lsst.eotest.sensor.MaskedCCD import MaskedCCD
 
 from lsst.eotest.fitsTools import fitsWriteto
 
 def make_stamp(imarr, y, x, l=200):
-    """Get postage stamp for crosstalk calculations."""
+    """Make an image postage stamp."""
 
     maxy, maxx = imarr.shape
-
+    
     y0 = max(0, y-l//2)
     y1 = min(maxy, y+l//2)
 
     x0 = max(0, x-l//2)
     x1 = min(maxx, x+l//2)
 
-    return deepcopy(imarr[y0:y1, x0:x1])
+    return imarr[y0:y1, x0:x1]
 
-def calibrated_stack(ccds, amp, gain=1.0):
+def crosstalk_model(params, aggressor_imarr):
+    """Create crosstalk victim model."""
 
-    ims = [ccd.unbiased_and_trimmed_image(amp) for ccd in ccds]
-    imarr = afwMath.statisticsStack(ims, afwMath.MEDIAN).getImage().getArray()*gain
+    ## Model parameters
+    crosstalk_coeff = params[0]
+    offset_z = params[1]
+    tilt_y = params[2]
+    tilt_x = params[3]
 
-    return imarr
-
-def calculate_noise(bias_frame):
-
-    noise_dict = {}
-    bias = MaskedCCD(bias_frame)
-    for amp in range(1, 17):
-        imarr = bias.unbiased_and_trimmed_image(amp).getImage().getArray()
-        noise = imarr.std()
-        noise_dict[amp] = noise
-
-    return noise_dict
-
-def crosstalk_model(coefficients, aggressor_array):
-    """Create a crosstalk victim postage stamp from model."""
-
-    ny, nx = aggressor_array.shape
-    crosstalk_signal = coefficients[0]
-    bias = coefficients[1]
-    tilty = coefficients[2]
-    tiltx = coefficients[3]
-
+    ## Construct model
+    ny, nx = aggressor_imarr.shape
     Y, X = np.mgrid[:ny, :nx]
-    model = crosstalk_signal*aggressor_array + tilty*Y + tiltx*X + bias
+    model = crosstalk_coeff*aggressor_imarr + tilt_y*Y + tilt_x*X + offset_z
+    
     return model
 
-def crosstalk_model_fit(aggressor_stamp, victim_stamp, num_iter=3, nsig=5.0, noise=7.0):
-    """Perform a crosstalk model fit for given  aggressor and victim stamps."""
+def crosstalk_fit(aggressor_stamp, victim_stamp, num_iter=3, nsig=5.0, noise=7.0):
+    """Perform crosstalk model fit."""
 
-    coefficients = np.asarray([[0,0,0,0]])
-    victim_array = np.ma.masked_invalid(victim_stamp)
-    mask = np.ma.getmask(victim_array)
+    params = np.asarray([0, 0, 0, 0])
+    victim_imarr = np.ma.masked_invalid(victim_stamp)
+    mask = np.ma.getmask(victim_imarr)
 
     for i in range(num_iter):
-        #
-        # Mask outliers using residual
-        #
-        model = np.ma.masked_where(mask, crosstalk_model(coefficients[0],
-                                                         aggressor_stamp))
-        residual = victim_array - model
+
+        ## Mask outliers using residual
+        model = np.ma.masked_where(mask, crosstalk_model(params, aggressor_stamp))
+        
+        residual = victim_imarr - model
         res_mean = residual.mean()
         res_std = residual.std()
-        victim_array = np.ma.masked_where(np.abs(residual-res_mean) \
+        victim_imarr = np.ma.masked_where(np.abs(residual - res_mean) \
                                               > nsig*res_std, victim_stamp)
-        mask = np.ma.getmask(victim_array)
-        #
-        # Construct masked, compressed basis arrays
-        #
+        mask = np.ma.getmask(victim_imarr)
+
+        ## Construct masked, compressed basis arrays
         ay, ax = aggressor_stamp.shape
-        bias = np.ma.masked_where(mask, np.ones((ay, ax))).compressed()
+        Z = np.ma.masked_where(mask, np.ones((ay, ax))).compressed()
         Y, X = np.mgrid[:ay, :ax]
         Y = np.ma.masked_where(mask, Y).compressed()
         X = np.ma.masked_where(mask, X).compressed()
-        aggressor_array = np.ma.masked_where(mask, aggressor_stamp).compressed()
-        #
-        # Perform least-squares minimization
-        #
-        b = victim_array.compressed()/noise
-        A = np.vstack([aggressor_array, bias, Y, X]).T/noise
-        coeffs, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
+        aggressor_imarr = np.ma.masked_where(mask, aggressor_stamp).compressed()
+
+        ## Perform least squares parameter estimation
+        b = victim_imarr.compressed()/noise
+        A = np.vstack([aggressor_imarr, Z, Y, X]).T/noise
+        params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
         covar = np.linalg.inv(np.dot(A.T, A))
         dof = b.shape[0] - 4
-        
-    return np.concatenate((coeffs, np.sqrt(covar.diagonal()), res, [dof]))
+
+    return np.concatenate((params, np.sqrt(covar.diagonal()), res, [dof]))
 
 class CrosstalkMatrix():
 
-    def __init__(self, aggressor_id, victim_id=None, filename=None, namps=16):
-        self.header = fits.Header()
-        self.header.set('AGGRESSOR', aggressor_id)
+    keys = ['XTALK', 'OFFSET_Z', 'TILT_Y', 'TILT_X',
+            'SIGMA_XTALK', 'SIGMA_Z', 'SIGMA_Y', 'SIGMA_X',
+            'RESIDUAL', 'DOF']
+
+    def __init__(self, aggressor_id, matrix=None, victim_id=None, namps=16):
+
+        ## Set sensor IDs
+        self.aggressor_id = aggressor_id
         if victim_id is not None:
-            self.header.set('VICTIM', victim_id)
+            self.victim_id = victim_id
         else:
-            self.header.set('VICTIM', aggressor_id)
-        self.filename = filename
+            self.victim_id = aggressor_id
         self.namps = namps
-        self._set_matrix()
-        if self.filename is not None:
-            self._read_matrix()
+        
+        ## Set crosstalk results
+        self.matrix = np.full((10, self.namps, self.namps), np.nan)
+        if matrix is not None:
+            self.matrix = matrix
 
-    def set_row(self, aggressor_amp, row):
-        """Set matrix row from results dictionary"""
-        for victim_amp in row.keys():
-            self.matrix[:, aggressor_amp-1, victim_amp-1] = row[victim_amp]
+    @classmethod
+    def from_fits(cls, infile):
+        """Initialize CrosstalkMatrix from a FITS file."""
 
-    def _set_matrix(self):
-        """Initialize crosstalk matrix as NaNs."""
-        self.matrix = np.zeros((10, self.namps, self.namps), dtype=np.float)
-        self.matrix[:] = np.nan
+        with fits.open(infile) as hdulist:
 
-    def _read_matrix(self):
-        """Read crosstalk matrix from file."""
-        if self.filename[-5:] == '.fits':
-            self._read_fits_matrix()
-        elif self.filename[-5:] == '.yaml':
-            self._read_yaml_matrix()
-        else:
-            raise ValueError('Crosstalk matrix file must be FITS or YAML filetype')
+            aggressor_id = hdulist[0].header['AGGRESSOR']
+            victim_id = hdulist[0].header['VICTIM']
+            namps = hdulist[0].header['NAMPS']
 
-    def _read_fits_matrix(self):
-        """Read crosstalk results from FITS file."""
-        with fits.open(self.filename) as hdulist:
-            for i in range(10):
-                self.matrix[i,:,:] = hdulist[i].data
+            matrix = np.full((10, namps, namps), np.nan)
+            for i, key in enumerate(cls.keys):
+                matrix[i, :, :] = hdulist[key].data
 
-    def _read_yaml_matrix(self):
-        """Read crosstalk results from a YAML file."""
-        raise NotImplementedError
+        return cls(aggressor_id, matrix=matrix, victim_id=victim_id, namps=16)
 
-    def write_fits(self, outfile=None, overwrite=True):
+    def set_row(self, aggressor_amp, row_results):
+        """Set matrix row from results dictionary."""
+
+        for victim_amp in row_results.keys():
+            self.matrix[:, aggressor_amp-1, victim_amp-1] = row_results[victim_amp]
+
+    def write_fits(self, outfile, **kwargs):
         """Write crosstalk results to FITS file."""
-        if outfile is None:
-            outfile = self.filename
-        else:
-            self.filename = outfile
-        #
-        # Save matrix results into separate HDUs
-        #
-        xtalk_hdu = fits.PrimaryHDU(self.matrix[0,:,:], header=self.header)
-        bias_hdu = fits.ImageHDU(self.matrix[1,:,:], name='BIAS')
+
+        ## Make primary HDU
+        hdr = fits.Header()
+        hdr['AGGRESSOR'] = self.aggressor_id
+        hdr['VICTIM'] = self.victim_id
+        hdr['NAMPS'] = self.namps
+        prihdu = fits.PrimaryHDU(header=hdr)
+
+        xtalk_hdu = fits.ImageHDU(self.matrix[0,:,:], name='XTALK')
+        offsetz_hdu = fits.ImageHDU(self.matrix[1,:,:], name='OFFSET_Z')
         tilty_hdu = fits.ImageHDU(self.matrix[2,:,:], name='TILT_Y')
         tiltx_hdu = fits.ImageHDU(self.matrix[3,:,:], name='TILT_X')
         xtalkerr_hdu = fits.ImageHDU(self.matrix[4,:,:], name='SIGMA_XTALK')
-        biaserr_hdu = fits.ImageHDU(self.matrix[5,:,:], name='SIGMA_BIAS')
-        tiltyerr_hdu = fits.ImageHDU(self.matrix[6,:,:], name='SIGMA_TILT_Y')
-        tiltxerr_hdu = fits.ImageHDU(self.matrix[7,:,:], name='SIGMA_TILT_X')
-        chisq_hdu = fits.ImageHDU(self.matrix[8,:,:], name='CHI_SQUARE')
+        zerr_hdu = fits.ImageHDU(self.matrix[5,:,:], name='SIGMA_Z')
+        yerr_hdu = fits.ImageHDU(self.matrix[6,:,:], name='SIGMA_Y')
+        xerr_hdu = fits.ImageHDU(self.matrix[7,:,:], name='SIGMA_X')
+        chisq_hdu = fits.ImageHDU(self.matrix[8,:,:], name='RESIDUAL')
         dof_hdu = fits.ImageHDU(self.matrix[9,:,:], name='DOF')
         
-        output = fits.HDUList([xtalk_hdu, bias_hdu, tilty_hdu, tiltx_hdu, 
-                               xtalkerr_hdu, biaserr_hdu, tiltyerr_hdu, tiltxerr_hdu,
-                               chisq_hdu, dof_hdu])
-        fitsWriteto(output, outfile, overwrite=overwrite)
+        hdulist = fits.HDUList([prihdu, xtalk_hdu, offsetz_hdu, tilty_hdu, tiltx_hdu, 
+                                xtalkerr_hdu, zerr_hdu, yerr_hdu, xerr_hdu, 
+                                chisq_hdu, dof_hdu])
 
-    def write_yaml(self, outfile, indent=2, crosstalkName='Unknown'):
-        """Write crosstalk results to a YAML file."""
+        hdulist.writeto(outfile, **kwargs)
 
-        ampNames = [str(i) for i in range(self.matrix.shape[1])]
-        assert self.matrix.shape == (10, len(ampNames), len(ampNames))
-
-        dIndent = indent
-        indent = 0
-        with open(outfile, "w") as fd:
-            print(indent*" " + "crosstalk :", file=fd)
-            indent += dIndent
-            print(indent*" " + "%s :" % crosstalkName, file=fd)
-            indent += dIndent
-
-            for i, ampNameI in enumerate(ampNames):
-                print(indent*" " + "%s : {" % ampNameI, file=fd)
-                indent += dIndent
-                print(indent*" ", file=fd, end='')
-
-                for j, ampNameJ in enumerate(ampNames):
-                    print("%s : %11.4e, " % (ampNameJ, coeff[i, j]), file=fd,
-                          end='\n' + indent*" " if j%4 == 3 else '')
-                print("}", file=fd)
-
-                indent -= dIndent
+    def write_yaml(self, outfile):
+        """Write crosstalk coefficients to a YAML file."""
+        raise NotImplementedError

@@ -9,7 +9,7 @@ def main(sensor_id, infiles, brute_search=False, ccd_type=None, dx0=None, dy0=No
     for i, infile in enumerate(infiles):
 
         ## Construct base command
-        logfile = join(log_dir, 'logfile_mixtask_gridfit_sensor_{0:03d}.log'.format(i))
+        logfile = join(log_dir, 'logfile_mixtask_gridfit_sensor_{0:04d}.log'.format(i))
         command = ['bsub', '-W', '1:00', '-o', logfile, 'python',
                    'mixtask_gridfit_sensor.py', sensor_id, infile]
 
@@ -53,13 +53,12 @@ if __name__ == '__main__':
     parser.add_argument('--optics_grid_file', type=str, default=None,
                         help='FITS or CAT file with optic shifts.')
     parser.add_argument('--output_dir', '-o', type=str, default=None,
-                        help='Output directory for data products.')
+                        help='Output directory for analysis products.')
     parser.add_argument('--vary_theta', action='store_true',
                         help='Flag to enable theta variation during fit.')
     args = parser.parse_args()
-    print(args)
 
     main(args.sensor_id, args.infiles, brute_search=args.brute,
          ccd_type=args.ccd_type, dx0=args.dx0, dy0=args.dy0,
-         optics_grid_file=args.optics_grid_file,
+         log_dir=args.log_dir, optics_grid_file=args.optics_grid_file,
          output_dir=args.output_dir, vary_theta=args.vary_theta)
