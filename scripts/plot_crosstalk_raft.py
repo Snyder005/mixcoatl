@@ -105,25 +105,25 @@ def main(raft_id, results_dir, binned_cmap=False, full_matrix=True, output_dir='
         for i, sensor_id in enumerate(sensor_list):
 
             infiles = glob.glob(join(results_dir, 
-                                     '{0}_{1}_{0}_{2}*.fits'.format(raft_id, 
-                                                                    sensor_id, 
-                                                                    sensor_id2)))
-
+                                     '{0}_{1}_{0}_{1}*.fits'.format(raft_id, 
+                                                                    sensor_id)))
+            print(sensor_id, infiles)
             try:
                 with fits.open(infiles[0]) as hdulist:
                     xtalk = hdulist[1].data
             except:
+                print("Not found")
                 continue
 
             np.fill_diagonal(xtalk, np.nan)
 
-            im = axes[i].imshow(xtalk, norm=norm, cmap=cmap, interpolation='none', 
+            im1 = axes[i].imshow(xtalk, norm=norm, cmap=cmap, interpolation='none', 
                                 extent=(0.5, 16.5, 16.5, 0.5))
             axes[i].set_title('{0}'.format(sensor_id), fontsize=16)
 
         fig.subplots_adjust(right=0.93)
         cbar_ax = fig.add_axes([0.9, 0.15, 0.02, 0.7])
-        cbar = fig.colorbar(im, cax=cbar_ax, orientation='vertical', 
+        cbar = fig.colorbar(im1, cax=cbar_ax, orientation='vertical', 
                             ticks=cbar_ticks)
         cbar.ax.set_yticklabels(cbar_ticklabels)
         cbar.set_label("Crosstalk ", size=18)
@@ -137,6 +137,8 @@ def main(raft_id, results_dir, binned_cmap=False, full_matrix=True, output_dir='
 
     outfile = join(output_dir, 
                    '{0}_crosstalk_coefficients.png'.format(raft_id))
+    plt.savefig(outfile)
+    plt.close()
 
 if __name__ == '__main__':
 
@@ -152,6 +154,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', '-o', type=str, default='./',
                         help='Output directory for analysis products.')
     args = parser.parse_args()
+    print(args)
 
-    main(args.sensor_id, binned_cmap=args.binned_cmap,
-         output_dir=args.output_dir)
+    main(args.raft_id, args.results_dir, binned_cmap=args.binned_cmap,
+         full_matrix=args.full_matrix, output_dir=args.output_dir)

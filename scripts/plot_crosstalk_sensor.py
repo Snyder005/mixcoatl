@@ -3,13 +3,13 @@ import argparse
 import glob
 import numpy as np
 from astropy.io import fits
-from os import join
+from os.path import join
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.ticker as ticker
 
-def main(infile, binned_cmap=False, output_dir='./'):
+def main(sensor_id, infile, binned_cmap=False, output_dir='./'):
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
@@ -65,17 +65,20 @@ def main(infile, binned_cmap=False, output_dir='./'):
     outfile = join(output_dir,
                    '{0}_crosstalk_coefficients.png'.format(sensor_id))
     plt.savefig(outfile)
+    plt.close()
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser("Plot crosstalk results for a sensor.")
     parser.add_argument('sensor_id', type=str,
                         help='CCD identifier (e.g. R22_S11)')
+    parser.add_argument('infile', type=str,
+                        help='Crosstalk matrix results file.')
     parser.add_argument('--binned_cmap', action='store_true',
                         help='Use logarithmically binned color map.')
     parser.add_argument('--output_dir', '-o', type=str, default='./',
                         help='Output directory for analysis products.')
     args = parser.parse_args()
 
-    main(args.sensor_id, binned_cmap=args.binned_cmap,
+    main(args.sensor_id, args.infile, binned_cmap=args.binned_cmap,
          output_dir=args.output_dir)
