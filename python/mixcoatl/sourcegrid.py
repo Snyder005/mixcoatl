@@ -229,7 +229,7 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
     ## Calculate residuals   
     indices, distances = coordinate_distances(srcY, srcX, gY, gX)
 
-    return distances[:, 0]/srcY.shape[0]
+    return distances[:, 0]
 
 def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
              brute_search=False, vary_theta=False, 
@@ -306,6 +306,6 @@ def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
                        fcn_kws={'normalized_shifts' : normalized_shifts,
                                 'ccd_geom' : ccd_geom},
                        nan_policy='omit')
-    result = minner.minimize(params=params)
+    result = minner.minimize(params=params, method='least_squares')
 
     return result
