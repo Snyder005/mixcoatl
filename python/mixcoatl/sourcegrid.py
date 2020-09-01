@@ -170,12 +170,6 @@ class DistortedGrid:
 
         hdulist.writeto(outfile, **kwargs)
 
-class MatchedCatalog:
-    """WIP"""
-    
-    def __init__(self):
-        pass
-
 def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     """Calculate the distances between two sets of points."""
     
@@ -235,11 +229,7 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
     ## Calculate residuals   
     indices, distances = coordinate_distances(srcY, srcX, gY, gX)
 
-    ## Scale if grid is offset by row/column
-    if srcY.shape[0] < gY.shape[0]:
-        return distances[:, 0] + (xstep+ystep)/2.
-    else:
-        return distances[:, 0]
+    return distances[:, 0]/srcY.shape[0]
 
 def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
              brute_search=False, vary_theta=False, 
@@ -292,26 +282,20 @@ def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
     params.add('theta', value=theta, vary=False)
 
     ## Optionally perform initial brute search
+    params.add('y0', value=y0_guess, min=y0_guess-ystep/3., max=y0_guess+ystep/3., 
+               vary=True, brute_step=ystep/6.)
+    params.add('x0', value=x0_guess, min=x0_guess-xstep/3., max=x0_guess+xstep/3., 
+               vary=True, brute_step=xstep/6.)
     if brute_search:
-        params.add('y0', value=y0_guess, min=y0_guess-ystep, max=y0_guess+ystep, 
-                   vary=True, brute_step=ystep/4.)
-        params.add('x0', value=x0_guess, min=x0_guess-xstep, max=x0_guess+xstep, 
-                   vary=True, brute_step=xstep/4.)
         minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
                            fcn_kws={'normalized_shifts' : normalized_shifts,
                                     'ccd_geom' : ccd_geom},
                            nan_policy='omit')
         result = minner.minimize(method='brute', params=params)
         params = result.params
-        params['y0'].set(min=y0_guess-ystep/3., max=y0_guess+ystep/3.)
-        params['x0'].set(min=x0_guess-xstep/3., max=x0_guess+xstep/3.)
-
-    ## Else perform more constrained search
-    else:
-        params.add('y0', value=y0_guess, min=y0_guess-ystep/3., max=y0_guess+ystep/3., 
-                   vary=True)
-        params.add('x0', value=x0_guess, min=x0_guess-xstep/3., max=x0_guess+xstep/3., 
-                   vary=True)
+        parvals = params.valuesdict()
+        params['y0'].set(min=parvals['y0']-ystep/3., max=parvals['y0']+ystep/3.)
+        params['x0'].set(min=parvals['x0']-xstep/3., max=parvals['x0']+xstep/3.)
 
     ## Optionally enable parameter fit to theta
     if vary_theta:
