@@ -56,9 +56,8 @@ class GridFitTask(pipeBase.Task):
             all_srcX = src[1].data[x_kwd]
 
             ## Curate data here (remove bad shapes, fluxes, etc.)
-            all_srcW = np.sqrt(np.square(src[1].data[xx_kwd]) + \
-                                   np.square(src[1].data[yy_kwd]))
-            mask = (all_srcW > 4.)
+            mask = (src[1].data['base_SdssShape_XX'] > 4.5)*(src[1].data['base_SdssShape_XX'] <7.) \
+                *(src[1].data['base_SdssShape_YY'] > 4.5)*(src[1].data['base_SdssShape_YY'] <7.)
 
             srcY = all_srcY[mask]
             srcX = all_srcX[mask]
