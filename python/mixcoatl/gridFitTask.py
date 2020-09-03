@@ -22,6 +22,8 @@ class GridFitConfig(pexConfig.Config):
                                    default=False)
     vary_theta = pexConfig.Field("Vary theta parameter during fit", bool,
                                  default=False)
+    fit_method = pexConfig.Field("Method for fit", str,
+                                 default='least_squares')
     outfile = pexConfig.Field("Output filename", str, default="test.cat")
 
 class GridFitTask(pipeBase.Task):
@@ -82,6 +84,7 @@ class GridFitTask(pipeBase.Task):
                               brute_search=self.config.brute_search,
                               vary_theta=self.config.vary_theta,
                               normalized_shifts=normalized_shifts,
+                              method=self.config.fit_method,
                               ccd_geom=ccd_geom)
 
             ## Make best fit source grid
