@@ -231,9 +231,9 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
 
     return distances[:, 0]
 
-def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
-             brute_search=False, vary_theta=False, 
-             normalized_shifts=None, ccd_geom=None):
+def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows, brute_search=False, 
+             vary_theta=False, method='least_squares', normalized_shifts=None, 
+             ccd_geom=None):
 
     ## Calculate mean xstep/ystep
     nsources = srcY.shape[0]
@@ -306,6 +306,6 @@ def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
                        fcn_kws={'normalized_shifts' : normalized_shifts,
                                 'ccd_geom' : ccd_geom},
                        nan_policy='omit')
-    result = minner.minimize(params=params, method='least_squares')
+    result = minner.minimize(params=params, method=method)
 
     return result
