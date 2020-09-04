@@ -63,8 +63,6 @@ class CrosstalkTask(pipeBase.Task):
             ccd2 = MaskedCCD(infile2, bias_frame=bias_frame2, dark_frame=dark_frame2)      
             num_aggressors = 0
 
-            print(infile1)
-
             ## Search each amp for aggressor
             for i in all_amps:
                 imarr1 = ccd1.unbiased_and_trimmed_image(i).getImage().getArray()*gains1[i]
