@@ -23,7 +23,8 @@ class CrosstalkGenericTask(pipeBase.Task):
     ConfigClass = CrosstalkGenericConfig
     _DefaultName = "CrosstalkGenericTask"
 
-    def run(self, sensor_id1, infile1, aggressor_coords, gains1, bias_frame1=None, dark_frame1=None,
+    def run(self, sensor_id1, infile1, aggressor_coords, gains1, 
+            bias_frame1=None, dark_frame1=None,
             crosstalk_matrix_file=None, **kwargs):
 
         ## Parse kwargs for separate victim CCD inputs
@@ -48,12 +49,15 @@ class CrosstalkGenericTask(pipeBase.Task):
             crosstalk_matrix = CrosstalkMatrix.from_fits(crosstalk_matrix_file)
             outfile = crosstalk_matrix_file
         else:
-            crosstalk_matrix = CrosstalkMatrix(sensor_id1, victim_id=sensor_id2,
+            crosstalk_matrix = CrosstalkMatrix(sensor_id1, 
+                                               victim_id=sensor_id2,
                                                namps=len(all_amps))
             outfile = self.config.outfile
 
-        ccd1 = MaskedCCD(infile1, bias_frame=bias_frame1, dark_frame=dark_frame1)
-        ccd2 = MaskedCCD(infile2, bias_frame=bias_frame2, dark_frame=dark_frame2)      
+        ccd1 = MaskedCCD(infile1, bias_frame=bias_frame1, 
+                         dark_frame=dark_frame1)
+        ccd2 = MaskedCCD(infile2, bias_frame=bias_frame2, 
+                         dark_frame=dark_frame2)      
 
         ## Search each amp for aggressor
         for aggressor_coord in aggressor_coords:
@@ -73,5 +77,7 @@ class CrosstalkGenericTask(pipeBase.Task):
 
             crosstalk_matrix.set_row(i, row)
 
+        if sensor_id1 == sensor_id2:
+            crosstalk_matrix.set_diagonal(0.)
         crosstalk_matrix.write_fits(outfile, overwrite=True)
    

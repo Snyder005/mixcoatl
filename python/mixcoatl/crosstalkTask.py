@@ -27,8 +27,8 @@ class CrosstalkTask(pipeBase.Task):
     ConfigClass = CrosstalkConfig
     _DefaultName = "CrosstalkTask"
 
-    def run(self, sensor_id1, infiles1, gains1, bias_frame1=None, dark_frame1=None,
-            crosstalk_matrix_file=None, **kwargs):
+    def run(self, sensor_id1, infiles1, gains1, bias_frame1=None, 
+            dark_frame1=None, crosstalk_matrix_file=None, **kwargs):
 
         ## Parse kwargs for separate victim CCD inputs
         try:
@@ -54,13 +54,16 @@ class CrosstalkTask(pipeBase.Task):
             crosstalk_matrix = CrosstalkMatrix.from_fits(crosstalk_matrix_file)
             outfile = crosstalk_matrix_file
         else:
-            crosstalk_matrix = CrosstalkMatrix(sensor_id1, victim_id=sensor_id2,
+            crosstalk_matrix = CrosstalkMatrix(sensor_id1, 
+                                               victim_id=sensor_id2,
                                                namps=len(all_amps))
             outfile = self.config.outfile
 
         for infile1, infile2 in infiles_list:
-            ccd1 = MaskedCCD(infile1, bias_frame=bias_frame1, dark_frame=dark_frame1)
-            ccd2 = MaskedCCD(infile2, bias_frame=bias_frame2, dark_frame=dark_frame2)      
+            ccd1 = MaskedCCD(infile1, bias_frame=bias_frame1, 
+                             dark_frame=dark_frame1)
+            ccd2 = MaskedCCD(infile2, bias_frame=bias_frame2, 
+                             dark_frame=dark_frame2)      
             num_aggressors = 0
 
             ## Search each amp for aggressor
@@ -87,7 +90,10 @@ class CrosstalkTask(pipeBase.Task):
                                                      nsig=self.config.nsig)
 
                     crosstalk_matrix.set_row(i, row)
-                    if num_aggressors == self.config.aggressors_per_image: break
+                    if num_aggressors == self.config.aggressors_per_image: 
+                        break
 
+        if sensor_id1 == sensor_id2:
+            crosstalk_matrix.set_diagonal(0.)
         crosstalk_matrix.write_fits(outfile, overwrite=True)
    

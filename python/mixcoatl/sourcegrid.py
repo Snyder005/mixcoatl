@@ -306,6 +306,6 @@ def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows, brute_search=False,
                        fcn_kws={'normalized_shifts' : normalized_shifts,
                                 'ccd_geom' : ccd_geom},
                        nan_policy='omit')
-    result = minner.minimize(params=params, method=method)
+    result = minner.minimize(params=params, method=method, max_nfev=400)
 
     return result
