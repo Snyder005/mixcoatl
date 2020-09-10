@@ -65,6 +65,7 @@ class CrosstalkTask(pipeBase.Task):
             ccd2 = MaskedCCD(infile2, bias_frame=bias_frame2, 
                              dark_frame=dark_frame2)      
             num_aggressors = 0
+            signals = []
 
             ## Search each amp for aggressor
             for i in all_amps:
@@ -75,9 +76,10 @@ class CrosstalkTask(pipeBase.Task):
                 ly, lx = stamp1.shape
                 Y, X = np.ogrid[-ly/2:ly/2, -lx/2:lx/2]
                 mask = X*X + Y*Y <= 20*20
+		signal = np.mean(stamp1[mask])
 
-                if np.mean(stamp1[mask]) > self.config.threshold:
-
+                if signal > self.config.threshold:
+                    signals.append(signal)
                     row = {}
 
                     ## Calculate crosstalk for each victim amp
@@ -93,6 +95,7 @@ class CrosstalkTask(pipeBase.Task):
                     if num_aggressors == self.config.aggressors_per_image: 
                         break
 
+        crosstalk_matrix.signal = np.median(np.asarray(signals))
         if sensor_id1 == sensor_id2:
             crosstalk_matrix.set_diagonal(0.)
         crosstalk_matrix.write_fits(outfile, overwrite=True)
