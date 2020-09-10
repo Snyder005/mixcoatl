@@ -52,7 +52,7 @@ def main(sensor_id, infile, binned_cmap=False, output_dir='./'):
     ax.tick_params(axis='both', which='major', labelsize=14)
     ax.set_ylabel('Aggressor Amplifier', fontsize=20)
     ax.set_xlabel('Victim Amplifier', fontsize=20)
-    ax.set_title('{0}'.format(agg_amp), fontsize=22)
+    ax.set_title('{0}'.format(sensor_id), fontsize=22)
 
     fig.subplots_adjust(right=0.9)
     cbar_ax = fig.add_axes([0.85, 0.15, 0.03, 0.7])
