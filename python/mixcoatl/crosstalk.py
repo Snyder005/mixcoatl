@@ -83,8 +83,8 @@ class CrosstalkMatrix():
         else:
             self.victim_id = aggressor_id
         self.namps = namps
-	self.signal = signal
-        
+        self.signal = signal
+
         ## Set crosstalk results
         self._matrix = np.full((10, self.namps, self.namps), np.nan)
         if matrix is not None:
@@ -131,7 +131,7 @@ class CrosstalkMatrix():
         hdr['AGGRESSOR'] = self.aggressor_id
         hdr['VICTIM'] = self.victim_id
         hdr['NAMPS'] = self.namps
-	hdr['SIGNAL'] = self.signal
+        hdr['SIGNAL'] = self.signal
         prihdu = fits.PrimaryHDU(header=hdr)
 
         xtalk_hdu = fits.ImageHDU(self._matrix[0,:,:], name='XTALK')
