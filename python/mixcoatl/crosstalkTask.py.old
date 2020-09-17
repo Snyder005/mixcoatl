@@ -124,37 +124,8 @@ class CrosstalkColumnTask(pipeBase.Task):
     ConfigClass = CrosstalkColumnConfig
     _DefaultName = "CrosstalkColumnTask"
 
-    def run(self, sensor_name, infiles, database, gains, bias_frame=None, dark_frame=None):
-
-        ## Get sensor information from header
-        all_amps = imutils.allAmps(infiles[0])
-        with fits.open(infiles[0]) as hdulist:
-            manufacturer = hdulist[0].header['CCD_MANU']
-            lsst_num = hdulist[0].header['LSST_NUM']
-
-        with db_session(database) as session:
-
-            ## Get (add) sensor from (to) database
-            try:
-                sensor = Sensor.from_db(session, lsst_num=lsst_num)
-            except:
-                sensor = Sensor(name=sensor_name, lsst_num=lsst_num, manufacturer=manufacturer, 
-                                namps=len(all_amps))
-                sensor.segments = [Segment(name=utils.amp2seg[i], amplifier_number=i) for i in all_amps]
-                sensor.add_to_db(session)
-                session.commit()
-
-            ## Process image files
-            for infile in infiles:
-                ccd = MaskedCCD(infile, bias_frame=bias_frame, gains)
-
-                for agg in sensor.segment:
-
-                    pass
-
-
-    def run_old(self, sensor_id1, infile1, aggressor_column, gains1,
-                bias_frame1=None, dark_frame1=None, crosstalk_matrix_file=None, **kwargs):    
+    def run(self, sensor_id1, infile1, aggressor_column, gains1,
+            bias_frame1=None, dark_frame1=None, crosstalk_matrix_file=None, **kwargs):    
 
         try:
             sensor_id2 = kwargs['sensor_id2']

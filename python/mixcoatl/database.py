@@ -62,11 +62,12 @@ class Segment(Base):
     sensor_id = sql.Column(sql.Integer, sql.ForeignKey('sensor.id'))
     
     ## Relationships
-    results = relationship("Result", back_populates="aggressor", foreign_keys=[Result.aggressor_id])
+    results = relationship("Result", back_populates="aggressor", cascade="all, delete-orphan",
+                           foreign_keys=[Result.aggressor_id])
     sensor = relationship("Sensor", back_populates="segments")
     
     @classmethod
-    def from_db(cls, session, sensor_name, **kwargs):
+    def from_db(cls, session, **kwargs):
         """Initialize Segment from database using a query."""
         query = session.query(cls)
 
@@ -76,10 +77,15 @@ class Segment(Base):
         elif 'name' in kwargs:
             query = query.filter(cls.name == kwargs['name'])
         else:
-            raise MissingKeyword('Missing amplifier_number or name keyword for query.')
+            raise MissingKeyword("Missing 'amplifier_number' or 'name' keyword for query.")
 
-	## Filter on sensor name
-        query = query.join(Sensor).filter(Sensor.name == sensor_name)
+	    ## Filter on sensor name
+        if 'sensor_name' in kwargs:
+            query = query.join(Sensor).filter(Sensor.name == kwargs['sensor_name'])
+        elif 'lsst_num' in kwargs:
+            query = query.join(Sensor).filter(Sensor.lsst_num == kwargs['lsst_num'])
+        else:
+            raise MissingKeyword("Missing 'sensor_name' or 'lsst_num' keyword for query.")
 
         return query.one()
 
@@ -94,16 +100,26 @@ class Sensor(Base):
     ## Columns
     id = sql.Column(sql.Integer, primary_key=True)
     name = sql.Column(sql.String)
+    lsst_num = sql.Column(sql.String)
     manufacturer = sql.Column(sql.String)
     namps = sql.Column(sql.Integer)
     
     ## Relationships
-    segments = relationship("Segment", back_populates="sensor")
+    segments = relationship("Segment", collection_class=attribute_mapped_collection('amplifier_number'), 
+                            cascade="all, delete-orphan", back_populates="sensor")
     
     @classmethod
-    def from_db(cls, session, sensor_name):
+    def from_db(cls, session, **kwargs):
         """Initialize Sensor from database using a query."""
-        query = session.query(cls).filter(cls.name == sensor_name)
+        query = session.query(cls)
+
+        ## Query on name or lsst number
+        if 'sensor_name' in kwargs:
+            query = query.filter(cls.name == kwargs['sensor_name'])
+        elif 'lsst_num' in kwargs:
+            query = query.filter(cls.lsst_num == kwargs['lsst_num'])
+        else:
+            raise MissingKeyword("Missing 'sensor_name' or 'lsst_num' keyword for query.")
         
         return query.one()
             
