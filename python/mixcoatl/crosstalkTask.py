@@ -1,3 +1,13 @@
+"""MixCOATL Tasks for crosstalk analysis.
+
+TODO:
+    * Update CrosstalkSpotTask to interface with database and matrix.
+    * Update CrosstalkMatrix as needed.
+    * Test CrosstalkColumnTask.
+    * Add ability to programmatically determine aggressor amp and column.
+    * Add docstrings and confirm compliance with LSP coding style guide.
+"""
+
 import numpy as np
 from scipy.ndimage.filters import gaussian_filter
 import lsst.pex.config as pexConfig
@@ -7,6 +17,7 @@ import lsst.eotest.image_utils as imutils
 from lsst.eotest.sensor.MaskedCCD import MaskedCCD
 
 from mixcoatl.crosstalk import CrosstalkMatrix, make_stamp, crosstalk_fit
+from mixcoatl.utils import amp2seg
 
 class CrosstalkSpotConfig(pexConfig.Config)
     
@@ -24,11 +35,10 @@ class CrosstalkSpotConfig(pexConfig.Config)
 
 class CrosstalkColumnConfig(pexConfig.Config):
 
-    nsig = pexConfig.Field("Outlier rejection sigma threshold", float,
-                           default=7.0)
-    num_iter = pexConfig.Field("Number of least square iterations", int,
-                               default=3)
-    outfile = pexConfig.Field("Output filename", str)
+    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, default=7.0)
+    num_iter = pexConfig.Field("Number of least square iterations", int, default=1)
+    length_y = pexConfig.Field("Length of postage stamps in y-direction", int, default=200)
+    length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=50)
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
 
 class CrosstalkCoordsConfig(pexConfig.Config):
@@ -95,7 +105,7 @@ class CrosstalkSpotTask(pipeBase.Task):
                 ly, lx = stamp1.shape
                 Y, X = np.ogrid[-ly/2:ly/2, -lx/2:lx/2]
                 mask = X*X + Y*Y <= 20*20
-		signal = np.mean(stamp1[mask])
+		        signal = np.mean(stamp1[mask])
 
                 if signal > self.config.threshold:
                     signals.append(signal)
@@ -124,7 +134,7 @@ class CrosstalkColumnTask(pipeBase.Task):
     ConfigClass = CrosstalkColumnConfig
     _DefaultName = "CrosstalkColumnTask"
 
-    def run(self, sensor_name, infiles, database, gains, bias_frame=None, dark_frame=None):
+    def run(self, sensor_name, infiles, database, gains, aggressor_info, bias_frame=None, dark_frame=None):
 
         ## Get sensor information from header
         all_amps = imutils.allAmps(infiles[0])
@@ -140,71 +150,37 @@ class CrosstalkColumnTask(pipeBase.Task):
             except:
                 sensor = Sensor(name=sensor_name, lsst_num=lsst_num, manufacturer=manufacturer, 
                                 namps=len(all_amps))
-                sensor.segments = [Segment(name=utils.amp2seg[i], amplifier_number=i) for i in all_amps]
+                sensor.segments = {i : Segment(sensor_name=amp2seg[i], amplifier_number=i) for i in all_amps]
                 sensor.add_to_db(session)
                 session.commit()
 
+            ## Get configuration and analysis settings
+            amp, col = aggressor_info
+            ly = self.config.length_y
+            lx = self.config.length_x
+            num_iter = self.config.num_iter
+            nsig = self.config.nsig
+
             ## Process image files
             for infile in infiles:
-                ccd = MaskedCCD(infile, bias_frame=bias_frame, gains)
 
-                for agg in sensor.segment:
+                ccd = MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame)
+                aggressor_imarr = ccd.unbiased_and_trimmed_image(amp).getImage().getArray()*gains[amp]
+                signal = np.mean(aggressor_imarr[:, col])
+                aggressor_stamp = make_stamp(aggressor_imarr, 2000, col, ly=ly, lx=lx)
 
-                    pass
+                for i in all_amps:
 
+                    victim_imarr = ccd.unbiased_and_trimmed_image(i).getImage().getArray().gains[i]
+                    victim_stamp = make_stamp(victim_imarr, 2000, col, ly=ly, lx=lx)
+                    res = crosstalk_fit(aggressor_stamp, victim_stamp, noise=7.0, num_iter=num_iter, 
+                                        nsig=nsig)
 
-    def run_old(self, sensor_id1, infile1, aggressor_column, gains1,
-                bias_frame1=None, dark_frame1=None, crosstalk_matrix_file=None, **kwargs):    
-
-        try:
-            sensor_id2 = kwargs['sensor_id2']
-        except KeyError:
-            sensor_id2 = sensor_id1
-            infile2 = infile1
-            gains2 = gains1
-            bias_frame2 = bias_frame1
-            dark_frame2 = dark_frame1
-
-        all_amps = imutils.allAmps(infile1)
-
-        if crosstalk_matrix_file is not None:
-            crosstalk_matrix = CrosstalkMatrix.from_fits(crosstalk_matrix_file)
-            outfile = crosstalk_matrix_file
-        else:
-            crosstalk_matrix = CrosstalkMatrix(sensor_id1, signal=0.,
-                                               victim_id=sensor_id2,
-                                               namps=len(all_amps))
-            outfile = self.config.outfile
-
-        ccd1 = MaskedCCD(infile1, bias_frame=bias_frame1,
-                         dark_frame=dark_frame1)
-        ccd2 = MaskedCCD(infile2, bias_frame=bias_frame2,
-                         dark_frame=dark_frame2)
-
-        ## Search each amp for aggressor
-        i, col = aggressor_column
-        y, x = (1000, col)
-        ly = 400
-        lx = 100
-
-        imarr1 = ccd1.unbiased_and_trimmed_image(i).getImage().getArray()*gains1[i]
-        stamp1 = make_stamp(imarr1, y, x, ly=ly, lx=lx)
-        row = {}
-
-        ## Calculate crosstalk for each victim amp
-        for j in all_amps:
-            imarr2 = ccd2.unbiased_and_trimmed_image(j).getImage().getArray()*gains2[j]
-
-            stamp2 = make_stamp(imarr2, y, x)
-            row[j] = crosstalk_fit(stamp1, stamp2, noise=7.0,
-                                   num_iter=self.config.num_iter,
-                                   nsig=self.config.nsig)
-
-            crosstalk_matrix.set_row(i, row)
-
-        if sensor_id1 == sensor_id2:
-            crosstalk_matrix.set_diagonal(0.)
-        crosstalk_matrix.write_fits(outfile, overwrite=True)
+                    ## Add result to database
+                    result = Result(aggressor_id=sensor.segments[amp].id, aggressor_signal=signal,
+                                    coefficient=res[0], error=res[4], method='MODEL_LSQ',
+                                    victim_id=sensor.segments[i].id)
+                    result.add_to_db(session)
 
 class CrosstalkCoordsTask(pipeBase.Task):
 
