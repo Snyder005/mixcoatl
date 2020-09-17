@@ -3,6 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, backref, sessionmaker, aliased
 from contextlib import contextmanager
 from sqlalchemy.orm.exc import NoResultFound
+from sqlalchemy.orm.collections import attribute_mapped_collection
 
 from mixcoatl.errors import AlreadyExists, MissingKeyword
 
@@ -39,7 +40,6 @@ class Result(Base):
     aggressor_signal = sql.Column(sql.Float)
     coefficient = sql.Column(sql.Float)
     error = sql.Column(sql.Float)
-    filename = sql.Column(sql.String)
     method = sql.Column(sql.String)
     victim_id = sql.Column(sql.Integer, sql.ForeignKey('segment.id'))
 
@@ -57,7 +57,7 @@ class Segment(Base):
     
     ## Columns
     id = sql.Column(sql.Integer, primary_key=True)
-    name = sql.Column(sql.String)
+    segment_name = sql.Column(sql.String)
     amplifier_number = sql.Column(sql.Integer)
     sensor_id = sql.Column(sql.Integer, sql.ForeignKey('sensor.id'))
     
@@ -74,14 +74,14 @@ class Segment(Base):
         ## Query on amplifier number or name
         if 'amplifier_number' in kwargs:
             query = query.filter(cls.amplifier_number == kwargs['amplifier_number'])
-        elif 'name' in kwargs:
-            query = query.filter(cls.name == kwargs['name'])
+        elif 'segment_name' in kwargs:
+            query = query.filter(cls.segment_name == kwargs['segment_name'])
         else:
-            raise MissingKeyword("Missing 'amplifier_number' or 'name' keyword for query.")
+            raise MissingKeyword("Missing 'amplifier_number' or 'segment_name' keyword for query.")
 
 	    ## Filter on sensor name
         if 'sensor_name' in kwargs:
-            query = query.join(Sensor).filter(Sensor.name == kwargs['sensor_name'])
+            query = query.join(Sensor).filter(Sensor.sensor_name == kwargs['sensor_name'])
         elif 'lsst_num' in kwargs:
             query = query.join(Sensor).filter(Sensor.lsst_num == kwargs['lsst_num'])
         else:
@@ -99,7 +99,7 @@ class Sensor(Base):
     
     ## Columns
     id = sql.Column(sql.Integer, primary_key=True)
-    name = sql.Column(sql.String)
+    sensor_name = sql.Column(sql.String)
     lsst_num = sql.Column(sql.String)
     manufacturer = sql.Column(sql.String)
     namps = sql.Column(sql.Integer)
@@ -115,7 +115,7 @@ class Sensor(Base):
 
         ## Query on name or lsst number
         if 'sensor_name' in kwargs:
-            query = query.filter(cls.name == kwargs['sensor_name'])
+            query = query.filter(cls.sensor_name == kwargs['sensor_name'])
         elif 'lsst_num' in kwargs:
             query = query.filter(cls.lsst_num == kwargs['lsst_num'])
         else:
@@ -136,7 +136,7 @@ def query_results(session, sensor_name, aggressor_amp, victim_amp, methods=None)
         join(a2, Result.victim_id == a2.id).\
         filter(a1.amplifier_number == aggressor_amp).\
         filter(a2.amplifier_number == victim_amp).\
-        join(Sensor).filter(Sensor.name == sensor_name)
+        join(Sensor).filter(Sensor.sensor_name == sensor_name)
 
     if methods is not None:
         if not isinstance(methods, list):
