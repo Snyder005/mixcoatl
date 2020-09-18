@@ -22,39 +22,97 @@ from mixcoatl.database import Sensor, Segment, Result, db_session
 
 class CrosstalkSpotConfig(pexConfig.Config):
     
-    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, 
-                           default=5.0)
-    num_iter = pexConfig.Field("Number of least square iterations", int, 
-                               default=3)
-    threshold = pexConfig.Field("Aggressor spot mean signal threshold", float,
-                                default=40000.)
-    outfile = pexConfig.Field("Output filename", str, 
-                              default='crosstalk_matrix.fits')
-    verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
-    aggressors_per_image = pexConfig.Field("Number of aggressors per image",
-                                           int, default=4)
-
-class CrosstalkColumnConfig(pexConfig.Config):
-
     database = pexConfig.Field("SQL database DB file", str, default='test.db')
-    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, default=7.0)
-    num_iter = pexConfig.Field("Number of least square iterations", int, default=1)
-    length_y = pexConfig.Field("Length of postage stamps in y-direction", int, default=200)
-    length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=50)
-    verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
-    threshold = pexConfig.Field("Aggressor column mean signal threshold", float, default=1000.)
-
-class CrosstalkCoordsConfig(pexConfig.Config):
-
-    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, 
-                           default=5.0)
-    num_iter = pexConfig.Field("Number of least square iterations", int, 
-                               default=3)
-    outfile = pexConfig.Field("Output filename", str, 
-                              default='crosstalk_matrix.fits')
+    length = pexConfig.Field("Length of postage stamps in y and x direction", int, default=200)
+    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, default=5.0)
+    num_iter = pexConfig.Field("Number of least square iterations", int, default=3)
+    threshold = pexConfig.Field("Aggressor spot mean signal threshold", float, default=40000.)
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
 
 class CrosstalkSpotTask(pipeBase.Task):
+
+    ConfigClass = CrosstalkSpotConfig
+    _DefaultName = "CrosstalkSpotTask"
+
+    def run(self, sensor_name, infiles, gains, bias_frame=None, dark_frame=None, 
+            crosstalk_matrix_file=None):
+
+        all_amps = imutils.allAmps(infiles[0])
+        with fits.open(infiles[0]) as hdulist:
+            manufacturer = hdulist[0].header['CCD_MANU']
+            lsst_num = hdulist[0].header['LSST_NUM']
+
+        if crosstalk_matrix_file is not None:
+            crosstalk_matrix = CrosstalkMatrix.from_fits(crosstalk_matrix_file)
+            outfile = crosstalk_matrix_file
+        else:
+            crosstalk_matrix = CrosstalkMatrix(sensor_id1,
+                                               namps=len(all_amps))
+            outfile = 'test.fits'
+
+        database = self.config.database
+        with db_session(database) as session:
+
+            ## Get (Add) sensor from (to) database
+            try:
+                sensor = Sensor.from_db(session, lsst_num=lsst_num)
+            except NoResultFound:
+                sensor = Sensor(sensor_name=sensor_name, lsst_num=lsst_num, manufacturer=manufacturer, 
+                                namps=len(all_amps))
+                sensor.segments = {i : Segment(segment_name=AMP2SEG[i], amplifier_number=i) for i in all_amps}
+                sensor.add_to_db(session)
+                session.commit()
+
+            ## Get configuration and analysis settings
+            ly = lx = self.config.length
+            num_iter = self.config.num_iter
+            nsig = self.config.nsig
+            threshold = self.config.threshold
+
+            ## Process image files
+            for infile in infiles:
+
+                ccd = MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame)
+
+                ## Determine aggressor amplifier and find spot
+                for i in all_amps:
+                    aggressor_imarr = ccd1.unbiased_and_trimmed_image(i).getImage().getArray()
+                    smoothed = gaussian_filter(imarr1, 20)
+                    y, x = np.unravel_index(smoothed.argmax(), smoothed.shape)
+                    aggressor_stamp = make_stamp(aggressor_imarr, y, x, ly=ly, lx=lx)
+                    Y, X = np.ogrid[-ly/2:ly/2, -lx/2:lx/2]
+                    mask = X*X + Y*Y <= 20*20
+                    signal = np.mean(stamp1[mask])
+
+                    if signal < self.config.threshold:
+                        continue
+                    signals.append(signal)
+                    row = {}
+
+                    ## Calculate crosstalk for each victim amp
+                    for j in all_amps:
+                        victim_imarr = ccd2.unbiased_and_trimmed_image(j).getImage().getArray()
+
+                        victim_stamp = make_stamp(victim_imarr, y, x)
+                        res = crosstalk_fit(aggressor_stamp, victim_stamp, noise=7.0, num_iter=num_iter,
+                                            nsig=nsig)
+                        row[j] = res
+
+                        ## Add result to database
+                        result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
+                                        coefficient=res[0], error=res[4], method='MODEL_LSQ',
+                                        victim_id=sensor.segments[j].id)
+                        result.add_to_db(session)
+
+                    crosstalk_matrix.set_row(i, row)
+
+        crosstalk_matrix.signal = np.median(np.asarray(signals))
+        if sensor_id1 == sensor_id2:
+            crosstalk_matrix.set_diagonal(0.)
+        crosstalk_matrix.write_fits(outfile, overwrite=True)
+
+
+class InterCCDCrossTask(pipeBase.Task):
 
     ConfigClass = CrosstalkSpotConfig
     _DefaultName = "CrosstalkSpotTask"
@@ -132,6 +190,16 @@ class CrosstalkSpotTask(pipeBase.Task):
             crosstalk_matrix.set_diagonal(0.)
         crosstalk_matrix.write_fits(outfile, overwrite=True)
 
+class CrosstalkColumnConfig(pexConfig.Config):
+
+    database = pexConfig.Field("SQL database DB file", str, default='test.db')
+    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, default=7.0)
+    num_iter = pexConfig.Field("Number of least square iterations", int, default=1)
+    length_y = pexConfig.Field("Length of postage stamps in y-direction", int, default=200)
+    length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=50)
+    verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
+    threshold = pexConfig.Field("Aggressor column mean signal threshold", float, default=1000.)
+
 class CrosstalkColumnTask(pipeBase.Task):
 
     ConfigClass = CrosstalkColumnConfig
@@ -198,6 +266,16 @@ class CrosstalkColumnTask(pipeBase.Task):
                                         coefficient=res[0], error=res[4], method='MODEL_LSQ',
                                         victim_id=sensor.segments[j].id)
                         result.add_to_db(session)
+
+class CrosstalkCoordsConfig(pexConfig.Config):
+
+    nsig = pexConfig.Field("Outlier rejection sigma threshold", float,
+                           default=5.0)
+    num_iter = pexConfig.Field("Number of least square iterations", int,
+                               default=3)
+    outfile = pexConfig.Field("Output filename", str,
+                              default='crosstalk_matrix.fits')
+    verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
 
 class CrosstalkCoordsTask(pipeBase.Task):
 
