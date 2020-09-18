@@ -3,11 +3,8 @@
 TODO:
     * Update CrosstalkSpotTask to interface with database and matrix.
     * Update CrosstalkMatrix as needed.
-    * Test CrosstalkColumnTask.
-    * Add ability to programmatically determine aggressor amp and column.
     * Add docstrings and confirm compliance with LSP coding style guide.
 """
-
 import numpy as np
 from astropy.io import fits
 from scipy.ndimage.filters import gaussian_filter
@@ -17,6 +14,7 @@ import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 import lsst.eotest.image_utils as imutils
 from lsst.eotest.sensor.MaskedCCD import MaskedCCD
+from lsst.eotest.sensor.BrightPixels import BrightPixels
 
 from mixcoatl.crosstalk import CrosstalkMatrix, make_stamp, crosstalk_fit
 from mixcoatl.utils import AMP2SEG
@@ -139,7 +137,7 @@ class CrosstalkColumnTask(pipeBase.Task):
     ConfigClass = CrosstalkColumnConfig
     _DefaultName = "CrosstalkColumnTask"
 
-    def run(self, sensor_name, infiles, aggressor_info, bias_frame=None, dark_frame=None):
+    def run(self, sensor_name, infiles, bias_frame=None, dark_frame=None):
 
         ## Get sensor information from header
         all_amps = imutils.allAmps(infiles[0])
@@ -150,7 +148,7 @@ class CrosstalkColumnTask(pipeBase.Task):
         database = self.config.database
         with db_session(database) as session:
 
-            ## Get (add) sensor from (to) database
+            ## Get (Add) sensor from (to) database
             try:
                 sensor = Sensor.from_db(session, lsst_num=lsst_num)
             except NoResultFound:
@@ -172,24 +170,34 @@ class CrosstalkColumnTask(pipeBase.Task):
             for infile in infiles:
 
                 ccd = MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame)
-                aggressor_imarr = ccd.unbiased_and_trimmed_image(i).getImage().getArray()
-                signal = np.mean(aggressor_imarr[:, col])
-                aggressor_stamp = make_stamp(aggressor_imarr, 2000, col, ly=ly, lx=lx)
-                if signal < threshold:
-                    continue
 
-                for j in all_amps:
+                ## Determine aggressor amplifier and column
+                for i in all_amps:
+                    exptime = 1
+                    gain = 1
+                    bp = BrightPixels(ccd, i, exptime, gain, ethresh=threshold)
+                    pixels, columns = bp.find()
 
-                    victim_imarr = ccd.unbiased_and_trimmed_image(j).getImage().getArray()
-                    victim_stamp = make_stamp(victim_imarr, 2000, col, ly=ly, lx=lx)
-                    res = crosstalk_fit(aggressor_stamp, victim_stamp, noise=7.0, num_iter=num_iter, 
+                    if len(columns) == 0:
+                        continue
+                    col = columns[0]
+                    aggressor_imarr = ccd.unbiased_and_trimmed_image(i).getImage().getArray()
+                    signal = np.mean(aggressor_imarr[:, col])    
+                    aggressor_stamp = make_stamp(aggressor_imarr, 2000, col, ly=ly, lx=lx)
+
+                    ## Calculate crosstalk coefficient
+                    for j in all_amps:
+
+                        victim_imarr = ccd.unbiased_and_trimmed_image(j).getImage().getArray()
+                        victim_stamp = make_stamp(victim_imarr, 2000, col, ly=ly, lx=lx)
+                        res = crosstalk_fit(aggressor_stamp, victim_stamp, noise=7.0, num_iter=num_iter, 
                                         nsig=nsig)
 
-                    ## Add result to database
-                    result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
-                                    coefficient=res[0], error=res[4], method='MODEL_LSQ',
-                                    victim_id=sensor.segments[j].id)
-                    result.add_to_db(session)
+                        ## Add result to database
+                        result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
+                                        coefficient=res[0], error=res[4], method='MODEL_LSQ',
+                                        victim_id=sensor.segments[j].id)
+                        result.add_to_db(session)
 
 class CrosstalkCoordsTask(pipeBase.Task):
 

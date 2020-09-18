@@ -2,13 +2,11 @@
 import argparse
 from mixcoatl.crosstalkTask import CrosstalkColumnTask as CrosstalkTask
 
-def main(sensor_name, infiles, database, aggressor_amp, col, bias_frame=None, dark_frame=None):
-
-    aggressor_info = (aggressor_amp, col)
+def main(sensor_name, infiles, database, bias_frame=None, dark_frame=None):
     
     crosstalk_task = CrosstalkTask()
     crosstalk_task.config.database = database
-    crosstalk_task.run(sensor_name, infiles, aggressor_info, bias_frame=bias_frame, dark_frame=dark_frame)
+    crosstalk_task.run(sensor_name, infiles, bias_frame=bias_frame, dark_frame=dark_frame)
 
 if __name__ == '__main__':
 
