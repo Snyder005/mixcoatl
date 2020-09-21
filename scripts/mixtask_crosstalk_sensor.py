@@ -8,7 +8,7 @@ from os.path import join, basename, isdir
 from lsst.obs.lsst import LsstCamMapper as camMapper
 from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
 
-from mixcoatl.crosstalkTask import CrosstalkTask
+from mixcoatl.crosstalkTask import InterCCDCrosstalkTask as CrosstalkTask
 
 def main(sensor_id, main_dir, calib_dir, output_dir='./'):
 

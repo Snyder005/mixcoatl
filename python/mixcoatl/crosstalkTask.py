@@ -64,7 +64,7 @@ class CrosstalkSpotTask(pipeBase.Task):
                 session.commit()
 
             ## Get configuration and analysis settings
-            ly = lx = self.config.length
+            length = self.config.length
             num_iter = self.config.num_iter
             nsig = self.config.nsig
             threshold = self.config.threshold
@@ -79,7 +79,8 @@ class CrosstalkSpotTask(pipeBase.Task):
                     aggressor_imarr = ccd1.unbiased_and_trimmed_image(i).getImage().getArray()
                     smoothed = gaussian_filter(imarr1, 20)
                     y, x = np.unravel_index(smoothed.argmax(), smoothed.shape)
-                    aggressor_stamp = make_stamp(aggressor_imarr, y, x, ly=ly, lx=lx)
+                    aggressor_stamp = make_stamp(aggressor_imarr, y, x, ly=length, lx=length)
+                    ly, lx = aggressor_stamp.shape
                     Y, X = np.ogrid[-ly/2:ly/2, -lx/2:lx/2]
                     mask = X*X + Y*Y <= 20*20
                     signal = np.mean(stamp1[mask])
@@ -111,11 +112,18 @@ class CrosstalkSpotTask(pipeBase.Task):
             crosstalk_matrix.set_diagonal(0.)
         crosstalk_matrix.write_fits(outfile, overwrite=True)
 
+class InterCCDCrosstalkConfig(pexConfig.Config):
+    
+    length = pexConfig.Field("Length of postage stamps in y and x direction", int, default=200)
+    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, default=5.0)
+    num_iter = pexConfig.Field("Number of least square iterations", int, default=3)
+    threshold = pexConfig.Field("Aggressor spot mean signal threshold", float, default=40000.)
+    verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
 
-class InterCCDCrossTask(pipeBase.Task):
+class InterCCDCrosstalkTask(pipeBase.Task):
 
-    ConfigClass = CrosstalkSpotConfig
-    _DefaultName = "CrosstalkSpotTask"
+    ConfigClass = InterCCDCrosstalkConfig
+    _DefaultName = "InterCCDCrosstalkTask"
 
     def run(self, sensor_id1, infiles1, gains1, bias_frame1=None, 
             dark_frame1=None, crosstalk_matrix_file=None, **kwargs):
