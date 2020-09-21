@@ -3,16 +3,16 @@ from astropy.io import fits
 
 from lsst.eotest.fitsTools import fitsWriteto
 
-def make_stamp(imarr, y, x, l=200):
+def make_stamp(imarr, y, x, lx=200, ly=200):
     """Make an image postage stamp."""
 
     maxy, maxx = imarr.shape
     
-    y0 = max(0, y-l//2)
-    y1 = min(maxy, y+l//2)
+    y0 = max(0, y-ly//2)
+    y1 = min(maxy, y+ly//2)
 
-    x0 = max(0, x-l//2)
-    x1 = min(maxx, x+l//2)
+    x0 = max(0, x-lx//2)
+    x1 = min(maxx, x+lx//2)
 
     return imarr[y0:y1, x0:x1]
 
@@ -74,7 +74,7 @@ class CrosstalkMatrix():
             'SIGMA_XTALK', 'SIGMA_Z', 'SIGMA_Y', 'SIGMA_X',
             'RESIDUAL', 'DOF']
 
-    def __init__(self, aggressor_id, matrix=None, victim_id=None, namps=16):
+    def __init__(self, aggressor_id, signal=100000., matrix=None, victim_id=None, namps=16):
 
         ## Set sensor IDs
         self.aggressor_id = aggressor_id
@@ -83,11 +83,12 @@ class CrosstalkMatrix():
         else:
             self.victim_id = aggressor_id
         self.namps = namps
-        
+        self.signal = signal
+
         ## Set crosstalk results
-        self.matrix = np.full((10, self.namps, self.namps), np.nan)
+        self._matrix = np.full((10, self.namps, self.namps), np.nan)
         if matrix is not None:
-            self.matrix = matrix
+            self._matrix = matrix
 
     @classmethod
     def from_fits(cls, infile):
@@ -98,20 +99,31 @@ class CrosstalkMatrix():
             aggressor_id = hdulist[0].header['AGGRESSOR']
             victim_id = hdulist[0].header['VICTIM']
             namps = hdulist[0].header['NAMPS']
+            signal = hdulist[0].header['SIGNAL']
 
             matrix = np.full((10, namps, namps), np.nan)
             for i, key in enumerate(cls.keys):
                 matrix[i, :, :] = hdulist[key].data
 
-        return cls(aggressor_id, matrix=matrix, victim_id=victim_id, namps=16)
+        return cls(aggressor_id, signal=signal, matrix=matrix, victim_id=victim_id, namps=16)
+
+    @property
+    def matrix(self):
+        return self._matrix
 
     def set_row(self, aggressor_amp, row_results):
         """Set matrix row from results dictionary."""
 
         for victim_amp in row_results.keys():
-            self.matrix[:, aggressor_amp-1, victim_amp-1] = row_results[victim_amp]
+            self._matrix[:, aggressor_amp-1, victim_amp-1] = row_results[victim_amp]
 
-    def write_fits(self, outfile, **kwargs):
+    def set_diagonal(self, value):
+        """Set diagonal of matrices to value (e.g. 0.0 or NaN)."""
+        
+        for i in range(10):
+            np.fill_diagonal(self._matrix[i, :, :], value)
+
+    def write_fits(self, outfile, *kwargs):
         """Write crosstalk results to FITS file."""
 
         ## Make primary HDU
@@ -119,25 +131,48 @@ class CrosstalkMatrix():
         hdr['AGGRESSOR'] = self.aggressor_id
         hdr['VICTIM'] = self.victim_id
         hdr['NAMPS'] = self.namps
+        hdr['SIGNAL'] = self.signal
         prihdu = fits.PrimaryHDU(header=hdr)
 
-        xtalk_hdu = fits.ImageHDU(self.matrix[0,:,:], name='XTALK')
-        offsetz_hdu = fits.ImageHDU(self.matrix[1,:,:], name='OFFSET_Z')
-        tilty_hdu = fits.ImageHDU(self.matrix[2,:,:], name='TILT_Y')
-        tiltx_hdu = fits.ImageHDU(self.matrix[3,:,:], name='TILT_X')
-        xtalkerr_hdu = fits.ImageHDU(self.matrix[4,:,:], name='SIGMA_XTALK')
-        zerr_hdu = fits.ImageHDU(self.matrix[5,:,:], name='SIGMA_Z')
-        yerr_hdu = fits.ImageHDU(self.matrix[6,:,:], name='SIGMA_Y')
-        xerr_hdu = fits.ImageHDU(self.matrix[7,:,:], name='SIGMA_X')
-        chisq_hdu = fits.ImageHDU(self.matrix[8,:,:], name='RESIDUAL')
-        dof_hdu = fits.ImageHDU(self.matrix[9,:,:], name='DOF')
+        xtalk_hdu = fits.ImageHDU(self._matrix[0,:,:], name='XTALK')
+        offsetz_hdu = fits.ImageHDU(self._matrix[1,:,:], name='OFFSET_Z')
+        tilty_hdu = fits.ImageHDU(self._matrix[2,:,:], name='TILT_Y')
+        tiltx_hdu = fits.ImageHDU(self._matrix[3,:,:], name='TILT_X')
+        xtalkerr_hdu = fits.ImageHDU(self._matrix[4,:,:], name='SIGMA_XTALK')
+        zerr_hdu = fits.ImageHDU(self._matrix[5,:,:], name='SIGMA_Z')
+        yerr_hdu = fits.ImageHDU(self._matrix[6,:,:], name='SIGMA_Y')
+        xerr_hdu = fits.ImageHDU(self._matrix[7,:,:], name='SIGMA_X')
+        chisq_hdu = fits.ImageHDU(self._matrix[8,:,:], name='RESIDUAL')
+        dof_hdu = fits.ImageHDU(self._matrix[9,:,:], name='DOF')
         
-        hdulist = fits.HDUList([prihdu, xtalk_hdu, offsetz_hdu, tilty_hdu, tiltx_hdu, 
-                                xtalkerr_hdu, zerr_hdu, yerr_hdu, xerr_hdu, 
-                                chisq_hdu, dof_hdu])
+        hdulist = fits.HDUList([prihdu, xtalk_hdu, offsetz_hdu, tilty_hdu, 
+                                tiltx_hdu, xtalkerr_hdu, zerr_hdu, yerr_hdu, 
+                                xerr_hdu, chisq_hdu, dof_hdu])
 
         hdulist.writeto(outfile, **kwargs)
 
     def write_yaml(self, outfile):
         """Write crosstalk coefficients to a YAML file."""
-        raise NotImplementedError
+
+        ampNames = [str(i) for i in range(self.matrix.shape[1])]
+        assert self.matrix.shape == (10, len(ampNames), len(ampNames))
+
+        dIndent = indent
+        indent = 0
+        with open(outfile, "w") as fd:
+            print(indent*" " + "crosstalk :", file=fd)
+            indent += dIndent
+            print(indent*" " + "%s :" % crosstalkName, file=fd)
+            indent += dIndent
+
+            for i, ampNameI in enumerate(ampNames):
+                print(indent*" " + "%s : {" % ampNameI, file=fd)
+                indent += dIndent
+                print(indent*" ", file=fd, end='')
+
+                for j, ampNameJ in enumerate(ampNames):
+                    print("%s : %11.4e, " % (ampNameJ, coeff[i, j]), file=fd,
+                          end='\n' + indent*" " if j%4 == 3 else '')
+                print("}", file=fd)
+
+                indent -= dIndent
