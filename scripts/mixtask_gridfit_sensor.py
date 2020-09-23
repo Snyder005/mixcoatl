@@ -18,7 +18,7 @@ def main(sensor_id, infile, brute_search=False, ccd_type=None, dx0=0., dy0=0.,
     camera = camMapper._makeCamera()
     lct = LsstCameraTransforms(camera)
     projector_y = float(basename.split('_')[-1][:-5])
-    projector_x = float(basename.split('_')[-1][:-5])
+    projector_x = float(basename.split('_')[-2][:-1])
 
     ccd_name, ccd_x, ccd_y = lct.focalMmToCcdPixel(projector_y, projector_x)
 
