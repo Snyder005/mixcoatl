@@ -235,7 +235,6 @@ class CrosstalkColumnTask(pipeBase.Task):
                 session.commit()
 
             ## Get configuration and analysis settings
-            i, col = aggressor_info
             ly = self.config.length_y
             lx = self.config.length_x
             num_iter = self.config.num_iter
