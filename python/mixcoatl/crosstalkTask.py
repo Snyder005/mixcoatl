@@ -9,6 +9,8 @@ import numpy as np
 from astropy.io import fits
 from scipy.ndimage.filters import gaussian_filter
 from sqlalchemy.orm.exc import NoResultFound
+import logging
+from datetime import datetime
 
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
@@ -222,6 +224,9 @@ class CrosstalkColumnTask(pipeBase.Task):
             lsst_num = hdulist[0].header['LSST_NUM']
 
         database = self.config.database
+        logging.info('{0}    Running CrosstalkColumnTask using database {2}'.format(datetime.now(),
+                                                                                    sensor_name,
+                                                                                    database))
         with db_session(database) as session:
 
             ## Get (Add) sensor from (to) database
@@ -233,6 +238,7 @@ class CrosstalkColumnTask(pipeBase.Task):
                 sensor.segments = {i : Segment(segment_name=AMP2SEG[i], amplifier_number=i) for i in all_amps}
                 sensor.add_to_db(session)
                 session.commit()
+                logging.info("{0}    New sensor {1} added to database".format(datetime.now(), sensor_name))
 
             ## Get configuration and analysis settings
             ly = self.config.length_y
@@ -245,7 +251,7 @@ class CrosstalkColumnTask(pipeBase.Task):
             for infile in infiles:
 
                 ccd = MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame)
-
+                logging.info("{0}    Processing file {1}".format(datetime.now(), infile))
                 ## Determine aggressor amplifier and column
                 for i in all_amps:
                     exptime = 1
@@ -271,8 +277,11 @@ class CrosstalkColumnTask(pipeBase.Task):
                         ## Add result to database
                         result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
                                         coefficient=res[0], error=res[4], method='MODEL_LSQ',
-                                        victim_id=sensor.segments[j].id)
+                                        victim_id=sensor.segments[j].id, filename=infile)
                         result.add_to_db(session)
+                        logging.info('{0}    Injested C({1},{2}) for signal {3:.1f}'.format(datetime.now(), 
+                                                                                            i, j, 
+                                                                                            signal))
 
 class CrosstalkCoordsConfig(pexConfig.Config):
 
