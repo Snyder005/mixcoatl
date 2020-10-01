@@ -42,6 +42,7 @@ class Result(Base):
     error = sql.Column(sql.Float)
     method = sql.Column(sql.String)
     victim_id = sql.Column(sql.Integer, sql.ForeignKey('segment.id'))
+    filename = sql.Column(sql.String)
 
     ## Relationships
     aggressor = relationship("Segment", back_populates="results", foreign_keys=[aggressor_id])
