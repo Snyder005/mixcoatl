@@ -48,6 +48,10 @@ class Result(Base):
     aggressor = relationship("Segment", back_populates="results", foreign_keys=[aggressor_id])
     victim = relationship("Segment", foreign_keys=[victim_id])
     
+    def __repr__(self):
+        return "<Result(aggressor_signal={0:d}, coefficient={1:0.1e}, method='{2}')>".\
+            format(self.aggressor_signal, self.coefficient, self.method)
+
     def add_to_db(self, session):
         """Add Result to database."""
         session.add(self)
@@ -67,6 +71,10 @@ class Segment(Base):
                            foreign_keys=[Result.aggressor_id])
     sensor = relationship("Sensor", back_populates="segments")
     
+    def __repr__(self):
+        return "<Segment(segment_name='{0}', amplifier_number={1})>".format(self.sensor_name,
+                                                                            self.amplifier_number)
+
     @classmethod
     def from_db(cls, session, **kwargs):
         """Initialize Segment from database using a query."""
@@ -108,6 +116,11 @@ class Sensor(Base):
     ## Relationships
     segments = relationship("Segment", collection_class=attribute_mapped_collection('amplifier_number'), 
                             cascade="all, delete-orphan", back_populates="sensor")
+
+    def __repr__(self):
+        return "<Sensor(sensor_name='{0}', lsst_num='{1}', manufacturer='{2}')>".format(self.sensor_name,
+                                                                                        self.lsst_num,
+                                                                                        self.manufacturer)
     
     @classmethod
     def from_db(cls, session, **kwargs):
