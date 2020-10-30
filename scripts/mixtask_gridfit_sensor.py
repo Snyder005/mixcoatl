@@ -15,15 +15,18 @@ def main(sensor_id, infile, brute_search=False, ccd_type=None, dx0=0., dy0=0.,
     outfile = os.path.join(output_dir, '{0}_gridfit.cat'.format(root))
 
     ## Make initial grid center guess
-    camera = camMapper._makeCamera()
-    lct = LsstCameraTransforms(camera)
-    projector_y = float(basename.split('_')[-1][:-5])
-    projector_x = float(basename.split('_')[-2][:-1])
+    with fits.open(infile) as src:
 
-    ccd_name, ccd_x, ccd_y = lct.focalMmToCcdPixel(projector_y, projector_x)
+        all_srcY = src[1].data['base_SdssCentroid_Y']
+        all_srcX = src[1].data['base_SdssCentroid_X']
 
-    x0_guess = 2*509*4. - ccd_x + dx0
-    y0_guess = ccd_y + dy0
+        mask = (src[1].data['base_SdssShape_XX'] > 4.5) \
+            *(src[1].data['base_SdssShape_XX'] < 7.) \
+            *(src[1].data['base_SdssShape_YY'] > 4.5) \
+            *(src[1].data['base_SdssShape_YY'] < 7.)
+
+        y0_guess = np.nanmedian(all_srcY[mask])
+        x0_guess = np.nanmedian(all_srcX[mask])
 
     ## Configure and run task
     gridfit_task = GridFitTask()
