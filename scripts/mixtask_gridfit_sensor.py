@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import argparse
 import os
+from astropy.io import fits
+import numpy as np
 
 from lsst.obs.lsst import LsstCamMapper as camMapper
 from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
