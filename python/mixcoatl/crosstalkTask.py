@@ -292,35 +292,49 @@ class CrosstalkColumnTask(pipeBase.Task):
                                                                                       signal))
                 logging.info("{0}  Task completed successfully.".format(datetime.now()))
 
+class CrosstalkCoordConfig(pexConfig.Config):
 
-class CrosstalkColumnTask_old(pipeBase.Task):
+    database = pexConfig.Field("SQL database DB file", str, default='crosstalk.db')
+    nsig = pexConfig.Field("Outlier rejection sigma threshold", float, default=7.0)
+    num_iter = pexConfig.Field("Number of least square iterations", int, default=1)
+    length_y = pexConfig.Field("Length of postage stamps in y-direction", int, default=200)
+    length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=20)
+    verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
+    
+class CrosstalkCoordTask(pipeBase.Task):
 
-    ConfigClass = CrosstalkColumnConfig
-    _DefaultName = "CrosstalkColumnTask"
+    ConfigClass = CrosstalkCoordConfig
+    _DefaultName = "CrosstalkCoordTask"
 
-    def run(self, sensor_name, infiles, bias_frame=None, dark_frame=None):
+    def run(self, sensor_id, infiles, aggressor_coordinates, bias_frame=None,
+            dark_frame=None, linearity_correction=None, noise=7.0):
+
+        if not isinstance(infiles, list):
+            infiles = [infiles]
 
         ## Get sensor information from header
         all_amps = imutils.allAmps(infiles[0])
         with fits.open(infiles[0]) as hdulist:
-            manufacturer = hdulist[0].header['CCD_MANU']
             lsst_num = hdulist[0].header['LSST_NUM']
+            teststand = hdulist[0].header['TSTAND']
+            manufacturer = lsst_num[:3]
 
+        ## Interface with SQL database
         database = self.config.database
-        logging.info('{0}    Running CrosstalkColumnTask using database {1}'.format(datetime.now(),
-                                                                                    database))
+        logging.info("{0}  Running CrosstalkCoordTask using database {1}".format(datetime.now(), database))
+
         with db_session(database) as session:
 
-            ## Get (Add) sensor from (to) database
+            ## Get sensor from database
             try:
                 sensor = Sensor.from_db(session, lsst_num=lsst_num)
             except NoResultFound:
-                sensor = Sensor(sensor_name=sensor_name, lsst_num=lsst_num, manufacturer=manufacturer, 
+                sensor = Sensor(sensor_name=sensor_name, lsst_num=lsst_num, manufacturer=manufacturer,
                                 namps=len(all_amps))
                 sensor.segments = {i : Segment(segment_name=AMP2SEG[i], amplifier_number=i) for i in all_amps}
                 sensor.add_to_db(session)
                 session.commit()
-                logging.info("{0}    New sensor {1} added to database".format(datetime.now(), sensor_name))
+                logging.info("{0}  New sensor {1} added to database".format(datetime.now(), lsst_num))
 
             ## Get configuration and analysis settings
             ly = self.config.length_y
@@ -329,39 +343,38 @@ class CrosstalkColumnTask_old(pipeBase.Task):
             nsig = self.config.nsig
             threshold = self.config.threshold
 
-            ## Process image files
-            for infile in infiles:
+            ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
+                              linearity_correction=linearity_correction) for infile in infiles]
 
-                ccd = MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame)
-                logging.info("{0}    Processing file {1}".format(datetime.now(), infile))
-                ## Determine aggressor amplifier and column
-                for i in all_amps:
-                    exptime = 1
-                    gain = 1
-                    bp = BrightPixels(ccd, i, exptime, gain, ethresh=threshold)
-                    pixels, columns = bp.find()
+            logging.info("{0}  ".format(datetime.now()) + \
+                         "Processing files: {}".format(' '.join(map(str, infiles))))
 
-                    if len(columns) == 0:
+            for coord in aggressor_coordinates:
+
+                i, y, x = coord
+                aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
+                aggressor_imarr = imutils.stack(aggressor_images).getArray()
+                aggressor_stamp = make_stamp(aggressor_imarr, y, x, ly=ly, lx=lx)
+                signal = np.max(aggressor_stamp)
+                
+                ## Calculate crosstalk for uncontaminated victim amp
+                for j in all_amps:
+                    victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
+                    victim_imarr = imutils.stack(victim_images).getArray()
+                    victim_stamp = make_stamp(victim_imarr, y, x, ly=ly, lx=lx)
+                    if (np.std(victim_stamp) > 100.) and j != i:
                         continue
-                    col = columns[0]
-                    aggressor_imarr = ccd.unbiased_and_trimmed_image(i).getImage().getArray()
-                    signal = np.mean(aggressor_imarr[:, col])    
-                    aggressor_stamp = make_stamp(aggressor_imarr, 2000, col, ly=ly, lx=lx)
+                    res = crosstalk_fit(aggressor_stamp, victim_stamp, noise=noise, num_iter=num_iter, 
+                                        nsig=nsig)
 
-                    ## Calculate crosstalk coefficient
-                    for j in all_amps:
+                    ## Add result to database
+                    result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
+                                    coefficient=res[0], error=res[4], method='MODEL_LSQ',
+                                    victim_id=sensor.segments[j].id, filename=os.path.basename(infiles[0]),
+                                    teststand=teststand)
+                    result.add_to_db(session)
+                    logging.info("{0}  Injested C({1},{2}) for signal {3:.1f}".format(datetime.now(), i, j,
+                                                                                      signal))
+                logging.info("{0}  Task completed successfully.".format(datetime.now()))
 
-                        victim_imarr = ccd.unbiased_and_trimmed_image(j).getImage().getArray()
-                        victim_stamp = make_stamp(victim_imarr, 2000, col, ly=ly, lx=lx)
-                        res = crosstalk_fit(aggressor_stamp, victim_stamp, noise=7.0, num_iter=num_iter, 
-                                            nsig=nsig)
-
-                        ## Add result to database
-                        result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
-                                        coefficient=res[0], error=res[4], method='MODEL_LSQ',
-                                        victim_id=sensor.segments[j].id, filename=infile)
-                        result.add_to_db(session)
-                        logging.info("{0}    Injested C({1},{2}) for signal {3:.1f}".format(datetime.now(),
-                                                                                            i, j, 
-                                                                                            signal))
 
