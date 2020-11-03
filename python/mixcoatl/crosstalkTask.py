@@ -298,7 +298,7 @@ class CrosstalkCoordConfig(pexConfig.Config):
     nsig = pexConfig.Field("Outlier rejection sigma threshold", float, default=7.0)
     num_iter = pexConfig.Field("Number of least square iterations", int, default=1)
     length_y = pexConfig.Field("Length of postage stamps in y-direction", int, default=200)
-    length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=20)
+    length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=100)
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
     
 class CrosstalkCoordTask(pipeBase.Task):
@@ -306,11 +306,13 @@ class CrosstalkCoordTask(pipeBase.Task):
     ConfigClass = CrosstalkCoordConfig
     _DefaultName = "CrosstalkCoordTask"
 
-    def run(self, sensor_id, infiles, aggressor_coordinates, bias_frame=None,
+    def run(self, sensor_name, infiles, aggressor_coordinates, bias_frame=None,
             dark_frame=None, linearity_correction=None, noise=7.0):
 
         if not isinstance(infiles, list):
             infiles = [infiles]
+        if not isinstance(aggressor_coordinates, list):
+            aggressor_coordinates = [aggressor_coordinates]
 
         ## Get sensor information from header
         all_amps = imutils.allAmps(infiles[0])
@@ -341,7 +343,6 @@ class CrosstalkCoordTask(pipeBase.Task):
             lx = self.config.length_x
             num_iter = self.config.num_iter
             nsig = self.config.nsig
-            threshold = self.config.threshold
 
             ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
                               linearity_correction=linearity_correction) for infile in infiles]
