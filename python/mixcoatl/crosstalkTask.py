@@ -285,7 +285,7 @@ class CrosstalkColumnTask(pipeBase.Task):
                     ## Add result to database
                     result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
                                     coefficient=res[0], error=res[4], method='MODEL_LSQ',
-                                    victim_id=sensor.segments[j].id, filename=os.path.basename(infiles[0]),
+                                    victim_id=sensor.segments[j].id, task='CrosstalkColumnTask',
                                     teststand=teststand)
                     result.add_to_db(session)
                     logging.info("{0}  Injested C({1},{2}) for signal {3:.1f}".format(datetime.now(), i, j,
@@ -300,7 +300,10 @@ class CrosstalkCoordConfig(pexConfig.Config):
     length_y = pexConfig.Field("Length of postage stamps in y-direction", int, default=200)
     length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=100)
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
-    
+    contamination_threshold = pexConfig.Field("Noise threshold for victim contaminants", float, default=50.0)
+    restrict_to_side = pexConfig.Field("Restrict analysis to victim segments on single side of CCD",
+                                       bool, default=False)
+
 class CrosstalkCoordTask(pipeBase.Task):
 
     ConfigClass = CrosstalkCoordConfig
@@ -343,6 +346,7 @@ class CrosstalkCoordTask(pipeBase.Task):
             lx = self.config.length_x
             num_iter = self.config.num_iter
             nsig = self.config.nsig
+            contamination_threshold = self.config.contamination_threshold
 
             ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
                               linearity_correction=linearity_correction) for infile in infiles]
@@ -359,11 +363,19 @@ class CrosstalkCoordTask(pipeBase.Task):
                 signal = np.max(aggressor_stamp)
                 
                 ## Calculate crosstalk for uncontaminated victim amp
-                for j in all_amps:
+                if self.config.restrict_to_side:
+                    if i < 9:
+                        vic_amps = range(1, 9)
+                    else:
+                        vic_amps = range(9, 17)
+                else:
+                    vic_amps = all_amps
+
+                for j in vic_amps:
                     victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
                     victim_imarr = imutils.stack(victim_images).getArray()
                     victim_stamp = make_stamp(victim_imarr, y, x, ly=ly, lx=lx)
-                    if (np.std(victim_stamp) > 100.) and j != i:
+                    if (np.std(victim_stamp) > contamination_threshold) and j != i:
                         continue
                     res = crosstalk_fit(aggressor_stamp, victim_stamp, noise=noise, num_iter=num_iter, 
                                         nsig=nsig)
@@ -371,8 +383,7 @@ class CrosstalkCoordTask(pipeBase.Task):
                     ## Add result to database
                     result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
                                     coefficient=res[0], error=res[4], method='MODEL_LSQ',
-                                    victim_id=sensor.segments[j].id, filename=os.path.basename(infiles[0]),
-                                    teststand=teststand)
+                                    victim_id=sensor.segments[j].id, task='CrosstalkCoordTask', teststand=teststand)
                     result.add_to_db(session)
                     logging.info("{0}  Injested C({1},{2}) for signal {3:.1f}".format(datetime.now(), i, j,
                                                                                       signal))
