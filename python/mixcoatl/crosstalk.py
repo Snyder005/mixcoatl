@@ -3,18 +3,25 @@ from astropy.io import fits
 
 from lsst.eotest.fitsTools import fitsWriteto
 
-def make_stamp(imarr, y, x, lx=200, ly=200):
-    """Make an image postage stamp."""
+def rectangular_mask(imarr, y_center, x_center, lx, ly):
 
-    maxy, maxx = imarr.shape
-    
-    y0 = max(0, y-ly//2)
-    y1 = min(maxy, y+ly//2)
+    ny, nx = imarr.shape
+    Y, X = np.ogrid[:ny, :nx]
+    mask = (np.abs(Y - y) > ly) | (np.abs(X - x) > lx)
 
-    x0 = max(0, x-lx//2)
-    x1 = min(maxx, x+lx//2)
+    return mask
 
-    return imarr[y0:y1, x0:x1]
+def satellite_mask(imarr, angle, distance, width):
+
+    ay, ax = aggressor_imarr.shape
+    Y, X = np.ogrid[:ay, :ax]
+    mask = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) > width
+
+    return mask
+
+def circular_mask(imarr, y_center, x_center, radius):
+
+    raise NotImplementedError
 
 def crosstalk_model(params, aggressor_imarr):
     """Create crosstalk victim model."""
@@ -32,41 +39,26 @@ def crosstalk_model(params, aggressor_imarr):
     
     return model
 
-def crosstalk_fit(aggressor_stamp, victim_stamp, num_iter=3, nsig=5.0, noise=7.0):
-    """Perform crosstalk model fit."""
+def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
+    
+    victim_imarr = np.ma.masked_where(mask, victim_stamp)
 
-    params = np.asarray([0, 0, 0, 0])
-    victim_imarr = np.ma.masked_invalid(victim_stamp)
-    mask = np.ma.getmask(victim_imarr)
+    ## Construct masked, compressed basis arrays
+    ay, ax = aggressor_stamp.shape
+    Z = np.ma.masked_where(mask, np.ones((ay, ax))).compressed()
+    Y, X = np.mgrid[:ay, :ax]
+    Y = np.ma.masked_where(mask, Y).compressed()
+    X = np.ma.masked_where(mask, X).compressed()
+    aggressor_imarr = np.ma.masked_where(mask, aggressor_stamp).compressed()
 
-    for i in range(num_iter):
+    ## Perform least squares parameter estimation
+    b = victim_imarr.compressed()/noise
+    A = np.vstack([aggressor_imarr, Z, Y, X]).T/noise
+    params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
+    covar = np.linalg.inv(np.dot(A.T, A))
+    dof = b.shape[0] - 4
 
-        ## Mask outliers using residual
-        model = np.ma.masked_where(mask, crosstalk_model(params, aggressor_stamp))
-        
-        residual = victim_imarr - model
-        res_mean = residual.mean()
-        res_std = residual.std()
-        victim_imarr = np.ma.masked_where(np.abs(residual - res_mean) \
-                                              > nsig*res_std, victim_stamp)
-        mask = np.ma.getmask(victim_imarr)
-
-        ## Construct masked, compressed basis arrays
-        ay, ax = aggressor_stamp.shape
-        Z = np.ma.masked_where(mask, np.ones((ay, ax))).compressed()
-        Y, X = np.mgrid[:ay, :ax]
-        Y = np.ma.masked_where(mask, Y).compressed()
-        X = np.ma.masked_where(mask, X).compressed()
-        aggressor_imarr = np.ma.masked_where(mask, aggressor_stamp).compressed()
-
-        ## Perform least squares parameter estimation
-        b = victim_imarr.compressed()/noise
-        A = np.vstack([aggressor_imarr, Z, Y, X]).T/noise
-        params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
-        covar = np.linalg.inv(np.dot(A.T, A))
-        dof = b.shape[0] - 4
-
-    return np.concatenate((params, np.sqrt(covar.diagonal()), res, [dof]))
+    return np.concatenate((params, np.sqrt(covar.diagonal()), res, [dof]))    
 
 class CrosstalkMatrix():
 
