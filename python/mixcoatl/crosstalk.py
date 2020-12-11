@@ -13,7 +13,7 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
 
 def satellite_mask(imarr, angle, distance, width):
 
-    ay, ax = aggressor_imarr.shape
+    ay, ax = imarr.shape
     Y, X = np.ogrid[:ay, :ax]
     mask = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) > width
 

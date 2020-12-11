@@ -12,6 +12,8 @@ from sqlalchemy.orm.exc import NoResultFound
 import logging
 from datetime import datetime
 import os
+from skimage import feature
+from skimage.transform import hough_line, hough_line_peaks
 
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
@@ -19,7 +21,7 @@ import lsst.eotest.image_utils as imutils
 from lsst.eotest.sensor.MaskedCCD import MaskedCCD
 from lsst.eotest.sensor.BrightPixels import BrightPixels
 
-from mixcoatl.crosstalk import CrosstalkMatrix, make_stamp, crosstalk_fit
+from mixcoatl.crosstalk import CrosstalkMatrix, rectangular_mask, satellite_mask, crosstalk_fit
 from mixcoatl.utils import AMP2SEG
 from mixcoatl.database import Sensor, Segment, Result, db_session
 
@@ -280,7 +282,10 @@ class CrosstalkSatelliteConfig(pexConfig.Config):
 
     database = pexConfig.Field("SQL database DB file", str, default='crosstalk.db')
     width = pexConfig.Field("Single sided width of streak mask", int, default=50)
+    canny_sigma = pexConfig.Field("Sigma threshold for Canny edge detection.", float, default=10.)
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
+    restrict_to_side = pexConfig.Field("Restrict crosstalk to segment pairs on a single side", 
+                                       bool, default=True)
 
 class CrosstalkSatelliteTask(pipeBase.Task):
 
@@ -320,6 +325,7 @@ class CrosstalkSatelliteTask(pipeBase.Task):
             ## Get configuration and analysis settings
             width = self.config.width
             restrict_to_side = self.config.restrict_to_side
+            canny_sigma = self.config.canny_sigma
 
             ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
                               linearity_correction=linearity_correction) for infile in infiles]
@@ -327,15 +333,19 @@ class CrosstalkSatelliteTask(pipeBase.Task):
             logging.info("{0}  ".format(datetime.now()) + \
                          "Processing files: {}".format(' '.join(map(str, infiles))))
 
-            for coord in all_amps:
+            for i in all_amps:
 
                 aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
                 aggressor_imarr = imutils.stack(aggressor_images).getArray()
 
-                tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 360)
-                edges = feature.canny(image, sigma=10, low_threshold=1, high_threshold=25)
+                tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 1000)
+                edges = feature.canny(aggressor_imarr, sigma=canny_sigma, low_threshold=1, high_threshold=25)
                 h, theta, d = hough_line(edges, theta=tested_angles)
                 _, angle, dist = hough_line_peaks(h, theta, d)
+
+                if len(angle) == 0:
+                    continue
+
                 mean_angle = np.mean(angle)
                 mean_dist = np.mean(dist)
 
