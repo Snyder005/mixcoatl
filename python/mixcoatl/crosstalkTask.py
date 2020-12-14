@@ -365,6 +365,7 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                     victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
                     victim_imarr = imutils.stack(victim_images).getArray()
                     res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=noise)
+                    print(i, j, signal, res)
 
                     ## Add result to database
                     result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
