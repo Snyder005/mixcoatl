@@ -350,7 +350,7 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                 mean_dist = np.mean(dist)
 
                 mask = satellite_mask(aggressor_imarr, mean_angle, mean_dist, width=width)
-                signal = np.max(aggressor_imarr[mask])
+                signal = np.max(aggressor_imarr[~mask])
                 
                 ## Calculate crosstalk for uncontaminated victim amp
                 if restrict_to_side:
@@ -365,7 +365,6 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                     victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
                     victim_imarr = imutils.stack(victim_images).getArray()
                     res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=noise)
-                    print(i, j, signal, res)
 
                     ## Add result to database
                     result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
