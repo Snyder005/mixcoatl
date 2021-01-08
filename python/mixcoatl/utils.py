@@ -1,5 +1,6 @@
-import lsst.eotest.image_utils as imutils
+from astropy.io import fits
 
+import lsst.eotest.image_utils as imutils
 from lsst.eotest.sensor.MaskedCCD import MaskedCCD
 from lsst.eotest.sensor.AmplifierGeometry import AmplifierGeometry, amp_loc
 
