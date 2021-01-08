@@ -1,5 +1,6 @@
-import lsst.eotest.image_utils as imutils
+from astropy.io import fits
 
+import lsst.eotest.image_utils as imutils
 from lsst.eotest.sensor.MaskedCCD import MaskedCCD
 from lsst.eotest.sensor.AmplifierGeometry import AmplifierGeometry, amp_loc
 
@@ -36,3 +37,34 @@ def calibrated_stack(infiles, outfile, bias_frame=None, dark_frame=None,
         amp_images[amp] = imutils.stack(amp_ims).getImage()
 
     imutils.writeFits(amp_images, outfile, infiles[0], bitpix=bitpix)
+
+def make_superbias(sbias_frame, bias_frames):
+
+    ## Get overscan geometry
+    bias = MaskedCCD(bias_frames[0])
+    overscan = bias.amp_geom.serial_overscan
+    all_amps = imutils.allAmps(bias_frames[0])
+
+    ## Make superbias
+    bias_ampims = {amp : imutils.superbias(bias_frames, overscan, hdu=amp) for amp in all_amps}
+    template_file = bias_frames[0]
+    bitpix = 32
+
+    with fits.open(template_file) as template:
+
+        output = fits.HDUList()
+        output.append(fits.PrimaryHDU())
+        for amp in all_amps:
+            output.append(fits.ImageHDU(data=bias_ampims[amp].getArray()))
+        
+        output[0].header.update(template[0].header)
+        output[0].header['FILENAME'] = sbias_frame
+        metadata = bias_ampims.get('METADATA', None)
+        if metadata is not None:
+            for key, val in metadata.items():
+                output[0].header[key] = val
+        for amp in all_amps:
+            output[amp].header.update(template[amp].header)
+            imutils.set_bitpix(output[amp], bitpix)
+            
+        output.writeto(sbias_frame, overwrite=True, checksum=True)
