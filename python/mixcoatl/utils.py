@@ -1,5 +1,11 @@
+"""Utility objects and functions for MixCOATL.
+
+To Do:
+    * Fix AMP2SEG and SEG2AMP definitions.
+"""
 from astropy.io import fits
 
+import lsst.afw.math as afwMath
 import lsst.eotest.image_utils as imutils
 from lsst.eotest.sensor.MaskedCCD import MaskedCCD
 from lsst.eotest.sensor.AmplifierGeometry import AmplifierGeometry, amp_loc
@@ -24,6 +30,7 @@ SEG2AMP = {'C00' : 9, 'C01' : 10, 'C02' : 11, 'C03' : 12, 'C04' : 13, 'C05' : 14
 
 def calibrated_stack(infiles, outfile, bias_frame=None, dark_frame=None, 
                      linearity_correction=None, bitpix=32):
+    """Make a calibrated coadd image and write FITS image file."""
 
     ccds = [MaskedCCD(infile, bias_frame=bias_frame, 
                       dark_frame=dark_frame, 
@@ -39,6 +46,7 @@ def calibrated_stack(infiles, outfile, bias_frame=None, dark_frame=None,
     imutils.writeFits(amp_images, outfile, infiles[0], bitpix=bitpix)
 
 def make_superbias(sbias_frame, bias_frames):
+    """Make a superbias image."""
 
     ## Get overscan geometry
     bias = MaskedCCD(bias_frames[0])
@@ -68,3 +76,13 @@ def make_superbias(sbias_frame, bias_frames):
             imutils.set_bitpix(output[amp], bitpix)
             
         output.writeto(sbias_frame, overwrite=True, checksum=True)
+
+def calculate_read_noise(ccd, amp):
+    """Calculate amplifier read noise from serial overscan."""
+    
+    overscan = ccd.amp_geom.serial_overscan
+    
+    im = ccd.bias_subtracted_image(amp)
+    stdev = afwMath.makeStatistics(im.Factory(im, overscan), afwMath.STDEV).getValue()
+    
+    return stdev
