@@ -22,7 +22,7 @@ from lsst.eotest.sensor.MaskedCCD import MaskedCCD
 from lsst.eotest.sensor.BrightPixels import BrightPixels
 
 from mixcoatl.crosstalk import CrosstalkMatrix, rectangular_mask, satellite_mask, crosstalk_fit
-from mixcoatl.utils import AMP2SEG
+from mixcoatl.utils import AMP2SEG, calculate_read_noise
 from mixcoatl.database import Sensor, Segment, Result, db_session
 
 class CrosstalkSpotConfig(pexConfig.Config):
@@ -206,8 +206,7 @@ class CrosstalkColumnTask(pipeBase.Task):
     ConfigClass = CrosstalkColumnConfig
     _DefaultName = "CrosstalkColumnTask"
 
-    def run(self, sensor_name, infiles, bias_frame=None, dark_frame=None, linearity_correction=None,
-            noise=7.0):
+    def run(self, sensor_name, infiles, bias_frame=None, dark_frame=None, linearity_correction=None):
 
         if not isinstance(infiles, list):
             infiles = [infiles]
@@ -257,6 +256,8 @@ class CrosstalkColumnTask(pipeBase.Task):
                     continue
                 col = columns[0]
 
+                read_noise = calculate_read_noise(ccds[0], i)*np.sqrt(2./len(ccds))
+
                 aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
                 aggressor_imarr = imutils.stack(aggressor_images).getArray()
                 signal = np.mean(aggressor_imarr[:, col])
@@ -266,7 +267,7 @@ class CrosstalkColumnTask(pipeBase.Task):
                 for j in all_amps:
                     victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
                     victim_imarr = imutils.stack(victim_images).getArray()
-                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=noise)
+                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=read_noise)
 
                     ## Add result to database
                     result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
@@ -293,7 +294,7 @@ class CrosstalkSatelliteTask(pipeBase.Task):
     _DefaultName = "CrosstalkSatelliteTask"
 
     def run(self, sensor_name, infiles, bias_frame=None, dark_frame=None, 
-            linearity_correction=None, noise=7.0):
+            linearity_correction=None):
 
         if not isinstance(infiles, list):
             infiles = [infiles]
@@ -335,6 +336,9 @@ class CrosstalkSatelliteTask(pipeBase.Task):
 
             for i in all_amps:
 
+                ## Calculate read noise
+                read_noise = calculate_read_noise(ccds[0], i)*np.sqrt(2./len(ccds))
+
                 aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
                 aggressor_imarr = imutils.stack(aggressor_images).getArray()
 
@@ -364,7 +368,7 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                 for j in vic_amps:
                     victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
                     victim_imarr = imutils.stack(victim_images).getArray()
-                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=noise)
+                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=read_noise)
 
                     ## Add result to database
                     result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
@@ -393,7 +397,7 @@ class CrosstalkCoordTask(pipeBase.Task):
     _DefaultName = "CrosstalkCoordTask"
 
     def run(self, sensor_name, infiles, aggressor_coordinates, bias_frame=None,
-            dark_frame=None, linearity_correction=None, noise=7.0):
+            dark_frame=None, linearity_correction=None):
 
         if not isinstance(infiles, list):
             infiles = [infiles]
@@ -439,6 +443,8 @@ class CrosstalkCoordTask(pipeBase.Task):
 
             for coord in aggressor_coordinates:
 
+                read_noise = calculate_read_noise(ccds[0], i)*np.sqrt(2./len(ccds))
+
                 i, y, x = coord
                 aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
                 aggressor_imarr = imutils.stack(aggressor_images).getArray()
@@ -460,7 +466,7 @@ class CrosstalkCoordTask(pipeBase.Task):
                     victim_stamp = make_stamp(victim_imarr, y, x, ly=ly, lx=lx)
                     if (np.std(victim_stamp) > contamination_threshold) and j != i:
                         continue
-                    res = crosstalk_fit(aggressor_stamp, victim_stamp, noise=noise, num_iter=num_iter, 
+                    res = crosstalk_fit(aggressor_stamp, victim_stamp, noise=read_noise, num_iter=num_iter, 
                                         nsig=nsig)
 
                     ## Add result to database
