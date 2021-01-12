@@ -4,6 +4,9 @@ To Do:
     * Fix AMP2SEG and SEG2AMP definitions.
 """
 from astropy.io import fits
+import matplotlib.pyplot as plt
+import numpy as np
+import ipywidgets as widgets
 
 import lsst.afw.math as afwMath
 import lsst.eotest.image_utils as imutils
@@ -86,3 +89,113 @@ def calculate_read_noise(ccd, amp):
     stdev = afwMath.makeStatistics(im.Factory(im, overscan), afwMath.STDEV).getValue()
     
     return stdev
+
+class CrosstalkResults(widgets.VBox):
+    
+    def __init__(self, results, agg, vic):
+        super().__init__()
+        self.results = results
+        output = widgets.Output()
+        
+        x, y, yerr = self.results[(agg, vic)]
+        
+        with output:
+            self.fig, self.ax = plt.subplots(constrained_layout=True, figsize=(7.5, 5))
+        self.ax.errorbar(x, y/y[-1], yerr=yerr/(np.sqrt(18)*y[-1]), c='blue', marker='o')
+        
+        self.fig.canvas.toolbar_position = 'bottom'
+        self.ax.set_ylabel('Normalized Crosstalk Coefficient', fontsize=12)
+        self.ax.set_xlabel('Signal [ADU]', fontsize=12)
+        self.ax.grid(True, which='major', axis='both')
+        self.ax.set_title('Aggressor Amp{0}, Victim Amp{1}'.format(agg, vic), fontsize=12)
+        
+        self.aggressor_slider = widgets.IntSlider(value=agg, min=1, max=8, step=1, description='Aggressor:',
+                                                  continuous_update=False, orientation='horizontal')
+        self.victim_slider = widgets.IntSlider(value=vic, min=1, max=8, step=1, description='Victim:',
+                                               continuous_update=False, orientation='horizontal')
+        self.norm_checkbox = widgets.Checkbox(value=True, description='Normalized:')
+        
+        self.aggressor_slider.observe(self.update_agg, 'value')
+        self.victim_slider.observe(self.update_vic, 'value')
+        self.norm_checkbox.observe(self.toggle_norm, 'value')
+        
+        controls = widgets.TwoByTwoLayout(top_left=self.aggressor_slider, 
+                                          bottom_left=self.victim_slider,
+                                          top_right=self.norm_checkbox)
+        
+        out_box = widgets.Box([output])
+        
+        self.children = [output, controls]
+        
+    def update_agg(self, change):
+        """Remove old lines from plot and plot new one"""
+        [l.remove() for l in self.ax.lines]
+        [l.remove() for l in self.ax.collections]
+            
+        if self.norm_checkbox.value:
+
+            x, y, yerr = self.results[(change.new, self.victim_slider.value)]
+            self.ax.errorbar(x, y/y[-1], yerr=yerr/(np.sqrt(18)*y[-1]), c='blue', marker='o')
+            self.ax.set_title('Aggressor Amp{0}, Victim Amp{1}'.format(change.new, self.victim_slider.value),
+                              fontsize=12)
+            self.ax.relim()
+            self.ax.set_ylabel('Normalized Crosstalk Coefficient', fontsize=12)
+            self.ax.auto_rescale()
+            
+        else:
+
+            x, y, yerr = self.results[(change.new, self.victim_slider.value)]
+            self.ax.errorbar(x, y, yerr=yerr/np.sqrt(18), c='blue', marker='o')
+            self.ax.set_title('Aggressor Amp{0}, Victim Amp{1}'.format(change.new, self.victim_slider.value),
+                              fontsize=12)
+            self.ax.relim()
+            self.ax.set_ylabel('Crosstalk Coefficient', fontsize=12)
+            self.ax.auto_rescale()
+            
+        
+    def update_vic(self, change):
+        """Remove old lines from plot and plot new one"""
+        [l.remove() for l in self.ax.lines]
+        [l.remove() for l in self.ax.collections]
+            
+        if self.norm_checkbox.value:
+
+            x, y, yerr = self.results[(self.aggressor_slider.value, change.new)]
+            self.ax.errorbar(x, y/y[-1], yerr=yerr/(np.sqrt(18)*y[-1]), c='blue', marker='o')
+            self.ax.set_title('Aggressor Amp{0}, Victim Amp{1}'.format(self.aggressor_slider.value, change.new),
+                              fontsize=12)
+            self.ax.relim()
+            self.ax.set_ylabel('Normalized Crosstalk Coefficient', fontsize=12)
+            self.ax.auto_rescale()
+            
+        else:
+
+            x, y, yerr = self.results[(self.aggressor_slider.value, change.new)]
+            self.ax.errorbar(x, y, yerr=yerr/np.sqrt(18), c='blue', marker='o')
+            
+            self.ax.set_title('Aggressor Amp{0}, Victim Amp{1}'.format(self.aggressor_slider.value, change.new),
+                              fontsize=12)
+            self.ax.relim()
+            self.ax.set_ylabel('Crosstalk Coefficient', fontsize=12)
+            self.ax.auto_rescale()
+
+    def toggle_norm(self, change):
+                
+        [l.remove() for l in self.ax.lines]
+        [l.remove() for l in self.ax.collections]
+            
+        if change.new:
+
+            x, y, yerr = self.results[(self.aggressor_slider.value, self.victim_slider.value)]
+            self.ax.errorbar(x, y/y[-1], yerr=yerr/(np.sqrt(18)*y[-1]), c='blue', marker='o')
+            self.ax.relim()
+            self.ax.set_ylabel('Normalized Crosstalk Coefficient', fontsize=12)
+            self.ax.auto_rescale()
+            
+        else:
+
+            x, y, yerr = self.results[(self.aggressor_slider.value, self.victim_slider.value)]
+            self.ax.errorbar(x, y, yerr=yerr/np.sqrt(18), c='blue', marker='o')
+            self.ax.relim()
+            self.ax.set_ylabel('Crosstalk Coefficient', fontsize=12)
+            self.ax.auto_rescale()
