@@ -8,7 +8,7 @@ Non-standard analysis tasks and scripts for processing LSST Camera images taken 
 
 ## Dependencies
 
-The MixCOATL module is being developed concurrently to use the latest version of the LSST Science Pipeline DM Stack, and should require no additional dependencies beyond what is included in this software stack. For information on how to install the LSST Science Pipeline, visit: <https://pipelines.lsst.io/>
+The MixCOATL module is being developed concurrently to use the latest version of the LSST Science Pipeline DM Stack. In addition, MixCOATL requires the installation of the `eotest` module (<https://github.com/lsst-camera-dh/eotest>), which can be installed using the `release` repository (<https://github.com/lsst-camera-dh/release>). For information on how to install the LSST Science Pipeline, visit: <https://pipelines.lsst.io/>
 
 ## Package Description
 
