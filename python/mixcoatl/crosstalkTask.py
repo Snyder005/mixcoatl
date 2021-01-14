@@ -283,7 +283,9 @@ class CrosstalkSatelliteConfig(pexConfig.Config):
 
     database = pexConfig.Field("SQL database DB file", str, default='crosstalk.db')
     width = pexConfig.Field("Single sided width of streak mask", int, default=50)
-    canny_sigma = pexConfig.Field("Sigma threshold for Canny edge detection.", float, default=10.)
+    canny_sigma = pexConfig.Field("Gaussian smoothing sigma for Canny edge detection.", float, default=15.)
+    low_threshold = pexConfig.Field("Low threshold for Canny edge detection.", float, default=1)
+    high_threshold = pexConfig.Field("High threshold for Canny edge detection.", float, default=15)
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
     restrict_to_side = pexConfig.Field("Restrict crosstalk to segment pairs on a single side", 
                                        bool, default=True)
@@ -327,6 +329,8 @@ class CrosstalkSatelliteTask(pipeBase.Task):
             width = self.config.width
             restrict_to_side = self.config.restrict_to_side
             canny_sigma = self.config.canny_sigma
+            low_threshold = self.config.low_threshold
+            high_threshold = self.config.high_threshold
 
             ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
                               linearity_correction=linearity_correction) for infile in infiles]
@@ -343,11 +347,12 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                 aggressor_imarr = imutils.stack(aggressor_images).getArray()
 
                 tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 1000)
-                edges = feature.canny(aggressor_imarr, sigma=canny_sigma, low_threshold=1, high_threshold=25)
+                edges = feature.canny(aggressor_imarr, sigma=canny_sigma, low_threshold=low_threshold, 
+                                      high_threshold=high_threshold)
                 h, theta, d = hough_line(edges, theta=tested_angles)
                 _, angle, dist = hough_line_peaks(h, theta, d)
 
-                if len(angle) == 0:
+                if len(angle) != 2:
                     continue
 
                 mean_angle = np.mean(angle)
