@@ -86,19 +86,23 @@ class CrosstalkSpotTask(pipeBase.Task):
                     if signal < self.config.threshold:
                         continue
                     signals.append(signal)
+
+                    read_noise = calculate_read_noise(ccd, i)*np.sqrt(2.)
+
                     row = {}
 
                     ## Calculate crosstalk for each victim amp
                     for j in all_amps:
                         victim_imarr = ccd.unbiased_and_trimmed_image(j).getImage().getArray()
 
-                        res = crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0)
+                        res = crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=read_noise)
                         row[j] = res
 
                         ## Add result to database
-                        result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
-                                        coefficient=res[0], error=res[4], method='MODEL_LSQ',
-                                        victim_id=sensor.segments[j].id)
+                        result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
+                                        aggressor_signal=signal, coefficient=res[0], error=res[4], 
+                                        methodology='MODEL_LSQ', image_type='largespots',
+                                        teststand=teststand, analysis='CrosstalkSpotTask', is_coadd=False)
                         result.add_to_db(session)
 
                     crosstalk_matrix.set_row(i, row)
@@ -239,6 +243,10 @@ class CrosstalkColumnTask(pipeBase.Task):
             ly = self.config.length_y
             lx = self.config.length_x
             threshold = self.config.threshold
+            if len(infiles) > 1:
+                is_coadd = True
+            else:
+                is_coadd = False
 
             ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
                               linearity_correction=linearity_correction) for infile in infiles]
@@ -270,10 +278,10 @@ class CrosstalkColumnTask(pipeBase.Task):
                     res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=read_noise)
 
                     ## Add result to database
-                    result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
-                                    coefficient=res[0], error=res[4], method='MODEL_LSQ',
-                                    victim_id=sensor.segments[j].id, task='CrosstalkColumnTask',
-                                    teststand=teststand)
+                    result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
+                                    aggressor_signal=signal, coefficient=res[0], error=res[4], 
+                                    methodology='MODEL_LSQ', image_type='injectedcolumn',
+                                    teststand=teststand, analysis='CrosstalkColumnTask', is_coadd=is_coadd)
                     result.add_to_db(session)
                     logging.info("{0}  Injested C({1},{2}) for signal {3:.1f}".format(datetime.now(), i, j,
                                                                                       signal))
@@ -331,6 +339,10 @@ class CrosstalkSatelliteTask(pipeBase.Task):
             canny_sigma = self.config.canny_sigma
             low_threshold = self.config.low_threshold
             high_threshold = self.config.high_threshold
+            if len(infiles) > 1:
+                is_coadd = True
+            else:
+                is_coadd = False
 
             ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
                               linearity_correction=linearity_correction) for infile in infiles]
@@ -376,9 +388,10 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                     res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=read_noise)
 
                     ## Add result to database
-                    result = Result(aggressor_id=sensor.segments[i].id, aggressor_signal=signal,
-                                    coefficient=res[0], error=res[4], method='MODEL_LSQ',
-                                    victim_id=sensor.segments[j].id, task='CrosstalkSatelliteTask', teststand=teststand)
+                    result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
+                                    aggressor_signal=signal, coefficient=res[0], error=res[4], 
+                                    methodology='MODEL_LSQ', teststand=teststand, image_type='satellite',
+                                    analysis='CrosstalkSatelliteTask', is_coadd=is_coadd)
                     result.add_to_db(session)
                     logging.info("{0}  Injested C({1},{2}) for signal {3:.1f}".format(datetime.now(), i, j,
                                                                                       signal))

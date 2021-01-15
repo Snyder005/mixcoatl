@@ -54,10 +54,9 @@ class Result(Base):
     coefficient = sql.Column(sql.Float, comment='Crosstalk coefficient.')
     error = sql.Column(sql.Float, comment='Error estimate for crosstalk coefficient.')
     methodology = sql.Column(sql.String, comment='Measurement methodology.')
+    image_type = sql.Column(sql.String, comment='Type of image (e.g. satellite).'
     teststand = sql.Column(sql.String, comment='Laboratory test stand.')
-    dataset = sql.Column(sql.String, comment='Name of dataset.')
-    filename = sql.Column(sql.String, nullable=True, comment='Image filename (if applicable).')
-    analysis = sql.Column(sql.String, comment='Analysis task.')
+    analysis = sql.Column(sql.String, comment='Analysis task (e.g. CrosstalkSatelliteTask).')
     is_coadd = sql.Column(sql.Boolean, comment='Indicator for coadded image.')
 
     ## Relationships
