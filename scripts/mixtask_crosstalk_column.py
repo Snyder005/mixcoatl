@@ -2,7 +2,7 @@
 import argparse
 import logging
 from datetime import datetime
-from mixcoatl.crosstalkTask import CrosstalkColumnTask as CrosstalkTask
+from mixcoatl.crosstalkTask import CrosstalkColumnTask
 
 def main(sensor_name, infiles, database, bias_frame=None, dark_frame=None, logfile=None):
 
@@ -10,11 +10,11 @@ def main(sensor_name, infiles, database, bias_frame=None, dark_frame=None, logfi
         logfile = database.replace('.db', '.log')
 
     logging.basicConfig(filename=logfile, level=logging.INFO)
-    logging.info('{0}    Running mixtask_crosstalk_column.py'.format(datetime.now()))
-    crosstalk_task = CrosstalkTask()
+    logging.info("{0}  Running mixtask_crosstalk_column.py".format(datetime.now()))
+    crosstalk_task = CrosstalkColumnTask()
     crosstalk_task.config.database = database
     crosstalk_task.run(sensor_name, infiles, bias_frame=bias_frame, dark_frame=dark_frame)
-    logging.info('{0}    Script completed successfully'.format(datetime.now()))
+    logging.info("{0}  Script completed successfully".format(datetime.now()))
 
 if __name__ == '__main__':
 
