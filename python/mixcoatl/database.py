@@ -27,11 +27,12 @@ def db_session(database, echo=False):
         `True` to enable Engine to log all statements to log handler, which
         defaults to `sys.stdout`.
     """
+    engine = sql.create_engine('sqlite:///{0}'.format(database), echo=echo)
+    Base.metadata.create_all(engine)
+    Session.configure(bind=engine)
+    session = Session()
+
     try:
-        engine = sql.create_engine('sqlite:///{0}'.format(database), echo=echo)
-        Base.metadata.create_all(engine)
-        Session.configure(bind=engine)
-        session = Session()
         yield session
         session.commit()
     except Exception as e:
@@ -156,7 +157,7 @@ class Sensor(Base):
         """Add Sensor to database."""
         session.add(self)
 
-def query_results(session, sensor_name, aggressor_amp, victim_amp, methodology=None):
+def query_results(session, sensor_name, aggressor_amp, victim_amp, **kwargs):
     """Query database for results."""
     a1 = aliased(Segment)
     a2 = aliased(Segment)
@@ -167,7 +168,16 @@ def query_results(session, sensor_name, aggressor_amp, victim_amp, methodology=N
         filter(a2.amplifier_number == victim_amp).\
         join(Sensor).filter(Sensor.sensor_name == sensor_name)
 
-    if methods is not None:
-        query = query.filter(Result.methodology == methodology)
+    ## Filter results by columns 
+    if 'methodology' in kwargs:
+        query = query.filter(Result.methodology == kwargs['methodology'])
+    if 'image_type' in kwargs:
+        query = query.filter(Result.image_type == kwargs['image_type'])
+    if 'teststand' in kwargs:
+        query = query.filter(Result.teststand == kwargs['teststand'])
+    if 'analysis' in kwargs:
+        query = query.filter(Result.analysis == kwargs['analysis'])
+    if 'is_coadd' in kwargs:
+        query = query.filter(Result.is_coadd == kwargs['is_coadd'])
 
     return query.all()
