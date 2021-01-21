@@ -194,7 +194,7 @@ class CrosstalkSpotTask(pipeBase.Task):
                                     analysis='CrosstalkSpotTask', is_coadd=is_coadd)
                     result.add_to_db(session)
                     logging.info("{0} Injested C({1},{2}) for signal {3:.1f}".format(datetime.now(), i, j,
-                                                                                     signal)
+                                                                                     signal))
 
             logging.info("{0}  Task completed successfully.".format(datetime.now()))
 
