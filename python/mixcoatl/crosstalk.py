@@ -33,7 +33,7 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
     """
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
-    mask = (np.abs(Y - y) > ly) | (np.abs(X - x) > lx)
+    mask = (np.abs(Y - Ny) > ly) | (np.abs(X - Nx) > lx)
 
     return mask
 

@@ -11,7 +11,7 @@ def main(sensor_name, infiles, database, bias_frame=None, dark_frame=None, logfi
 
     logging.basicConfig(filename=logfile, level=logging.INFO)
     logging.info("{0}  Running mixtask_crosstalk_spot.py".format(datetime.now()))
-    crosstalk_task = CrosstalkSpotTask
+    crosstalk_task = CrosstalkSpotTask()
     crosstalk_task.config.database = database
     crosstalk_task.run(sensor_name, infiles, bias_frame=bias_frame, dark_frame=dark_frame)
     logging.info("{0}  Script completed successfully".format(datetime.now()))

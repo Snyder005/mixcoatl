@@ -123,7 +123,7 @@ class CrosstalkSpotTask(pipeBase.Task):
     ConfigClass = CrosstalkSpotConfig
     _DefaultName = "CrosstalkSpotTask"
 
-    def run(self, sensor_name, infiles, gains, bias_frame=None, dark_frame=None, linearity_correction=None):
+    def run(self, sensor_name, infiles, bias_frame=None, dark_frame=None, linearity_correction=None):
 
         if not isinstance(infiles, list):
             infiles = [infiles]
