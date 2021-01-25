@@ -183,7 +183,7 @@ class CrosstalkSpotTask(pipeBase.Task):
                 ## Victim amplifiers
                 for j in all_amps:
                     
-                    victim_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
+                    victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
                     victim_imarr = imutils.stack(victim_images).getArray()
 
                     ## Add crosstalk result to database

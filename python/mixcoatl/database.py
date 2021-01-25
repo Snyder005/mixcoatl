@@ -65,8 +65,8 @@ class Result(Base):
     victim = relationship("Segment", foreign_keys=[victim_id])
     
     def __repr__(self):
-        return "<Result(aggressor_signal={0:d}, coefficient={1:0.1e}, method='{2}')>".\
-            format(self.aggressor_signal, self.coefficient, self.method)
+        return "<Result(aggressor_signal={0:d}, coefficient={1:0.1e}, methodology='{2}')>".\
+            format(self.aggressor_signal, self.coefficient, self.methodology)
 
     def add_to_db(self, session):
         """Add Result to database."""

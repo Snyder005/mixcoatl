@@ -38,7 +38,7 @@ def main(raft_id, database, main_dir, calib_dir, output_dir='./'):
         for infile in infiles:
             crosstalk_task = CrosstalkSpotTask()
             crosstalk_task.config.database = database
-            crosstalk_task.run(central_sensor, infile, bias_frame=bias_frame[central_sensor])
+            crosstalk_task.run(central_sensor, infile, bias_frame=bias_frames[central_sensor])
 
 if __name__ == '__main__':
 
@@ -57,5 +57,3 @@ if __name__ == '__main__':
 
     main(args.raft_id, args.database, args.main_dir, args.calib_dir,
          output_dir=args.output_dir)
-
-        
