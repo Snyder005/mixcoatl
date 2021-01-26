@@ -3,6 +3,7 @@ import argparse
 import glob
 import os
 import pickle
+import logging
 from os.path import join, basename, isdir
 
 from lsst.obs.lsst import LsstCamMapper as camMapper
@@ -11,6 +12,9 @@ from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
 from mixcoatl.crosstalkTask import CrosstalkSpotTask
 
 def main(raft_id, database, main_dir, calib_dir, output_dir='./'):
+
+    logfile = database.replace('.db', '.log')
+    logging.basicConfig(filename=logfile, level=logging.INFO)
 
     sensor_list = ['S00', 'S01', 'S02',
                    'S10', 'S11', 'S12',
