@@ -2,7 +2,7 @@
 import argparse
 import logging
 from datetime import datetime
-from mixcoatl.crosstalkTask import CrosstalkColumnTask
+from mixcoatl.crosstalkTask import CrosstalkSpotTask
 
 def main(sensor_name, infiles, database, bias_frame=None, dark_frame=None, logfile=None):
 
@@ -10,15 +10,15 @@ def main(sensor_name, infiles, database, bias_frame=None, dark_frame=None, logfi
         logfile = database.replace('.db', '.log')
 
     logging.basicConfig(filename=logfile, level=logging.INFO)
-    logging.info("{0}  Running mixtask_crosstalk_column.py".format(datetime.now()))
-    crosstalk_task = CrosstalkColumnTask()
+    logging.info("{0}  Running mixtask_crosstalk_spot.py".format(datetime.now()))
+    crosstalk_task = CrosstalkSpotTask()
     crosstalk_task.config.database = database
     crosstalk_task.run(sensor_name, infiles, bias_frame=bias_frame, dark_frame=dark_frame)
     logging.info("{0}  Script completed successfully".format(datetime.now()))
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser("Run CrosstalkColumnTask on image files.")
+    parser = argparse.ArgumentParser("Run CrosstalkSpotTask on image files.")
     parser.add_argument('sensor_name', type=str, 
                         help="CCD name (e.g. R22/S11")
     parser.add_argument('database', type=str,

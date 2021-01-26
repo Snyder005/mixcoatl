@@ -1,31 +1,108 @@
+"""Crosstalk functions and classes.
+
+This module contains a number of function and class definitions that are used
+for performing the measurement of electronic crosstalk in multi-segmented CCD
+images.
+"""
+
 import numpy as np
 from astropy.io import fits
 
 from lsst.eotest.fitsTools import fitsWriteto
 
 def rectangular_mask(imarr, y_center, x_center, lx, ly):
+    """Make a rectangular pixel mask.
 
-    ny, nx = imarr.shape
-    Y, X = np.ogrid[:ny, :nx]
-    mask = (np.abs(Y - y) > ly) | (np.abs(X - x) > lx)
+    Parameters
+    ----------
+    imarr : `numpy.ndarray`, (Ny, Nx)
+        2-D image pixel array.
+    y_center : `int`
+        Y-axis position of rectangle center.
+    x_center : `int`
+        X-axis position of rectangle center.
+    lx : `int`
+        Length of rectangle along X-axis.
+    ly : `int`
+        Length of rectangle along Y-axis.
+
+    Returns
+    -------
+    mask : `numpy.ndarray`, (Ny, Nx)
+        2-D mask boolean array.
+    """
+    Ny, Nx = imarr.shape
+    Y, X = np.ogrid[:Ny, :Nx]
+    mask = (np.abs(Y - y_center) > ly/2.) | (np.abs(X - x_center) > lx/2.)
 
     return mask
 
 def satellite_mask(imarr, angle, distance, width):
+    """Make a pixel mask along a target line.
 
-    ay, ax = imarr.shape
-    Y, X = np.ogrid[:ay, :ax]
+    Parameters
+    ----------
+    imarr : `numpy.ndarray`, (Ny, Nx)
+        2-D image pixel array.
+    angle : `float`
+        Angle (radians) between the X-axis and the line connecting the origin
+        to the closest point on the target line.
+    distance : `float`
+        Distance from the origin to the closest point on the target line.
+    width : `float`
+        Width of the mask extending from either side of the target line.
+
+    Returns
+    -------
+    mask : `numpy.ndarray`, (Ny, Nx)
+        2-D mask boolean array.
+    """
+    Ny, Nx = imarr.shape
+    Y, X = np.ogrid[:Ny, :Nx]
     mask = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) > width
 
     return mask
 
 def circular_mask(imarr, y_center, x_center, radius):
+    """Make a circular pixel mask.
 
+    Parameters
+    ----------
+    imarr : `numpy.ndarray`, (Ny, Nx)
+        2-D image pixel array.
+    y_center : `int`
+        Y-axis position of circle center.
+    x_center : `int`
+        X-axis position of circle center.
+    radius : `float`
+        Radius of the circle.
+
+    Returns
+    -------
+    mask : `numpy.ndarray`, (Ny, Nx)
+        2-D mask boolean array.
+    """
     raise NotImplementedError
 
 def crosstalk_model(params, aggressor_imarr):
-    """Create crosstalk victim model."""
+    """Create crosstalk victim model.
 
+    Parameters
+    ----------
+    params : array-like, (4,)
+        Input victim model parameters:
+        - crosstalk coefficient.
+        - Y-axis tilt.
+        - X-axis tilt.
+        - Constant offset.
+    aggressor_imarr : `numpy.ndarray`, (Ny, Nx)
+        2-D aggressor image pixel array.
+
+    Returns
+    -------
+    model : `numpy.ndarray`, (Ny, Nx)
+        2-D victim model pixel array.
+    """
     ## Model parameters
     crosstalk_coeff = params[0]
     offset_z = params[1]
@@ -33,14 +110,43 @@ def crosstalk_model(params, aggressor_imarr):
     tilt_x = params[3]
 
     ## Construct model
-    ny, nx = aggressor_imarr.shape
-    Y, X = np.mgrid[:ny, :nx]
+    Ny, Nx = aggressor_imarr.shape
+    Y, X = np.mgrid[:Ny, :Nx]
     model = crosstalk_coeff*aggressor_imarr + tilt_y*Y + tilt_x*X + offset_z
     
     return model
 
 def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
-    
+    """Perform crosstalk victim model least-squares minimization.
+
+
+    Parameters
+    ----------
+    aggressor_stamp: `numpy.ndarray`, (Ny, Nx)
+        2-D aggressor postage stamp pixel array.
+    victim_stamp: `numpy.ndarray`, (Ny, Nx)
+        2-D victim postage stamp pixel array.
+    mask: `numpy.ndarray`, (Ny, Nx)
+        2-D mask boolean array.
+    noise : `float`
+        Image read noise.
+
+    Returns
+    -------
+    results : `numpy.ndarray`, (10,)
+        Results of least-squares minimization:
+        - crosstalk coefficient.
+        - Y-axis tilt.
+        - X-axis tilt.
+        - Constant offset.
+        - Error estimate for crosstalk coefficient.
+        - Error estimate for Y-axis tilt.
+        - Error estimate for X-axis tilt.
+        - Error estimate for constant offset.
+        - Sum of residuals.
+        - Reduced degrees of freedom.
+    """    
+
     victim_imarr = np.ma.masked_where(mask, victim_stamp)
 
     ## Construct masked, compressed basis arrays
@@ -58,7 +164,9 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
     covar = np.linalg.inv(np.dot(A.T, A))
     dof = b.shape[0] - 4
 
-    return np.concatenate((params, np.sqrt(covar.diagonal()), res, [dof]))    
+    results = np.concatenate((params, np.sqrt(covar.diagonal()), res, [dof]))
+    
+    return results
 
 class CrosstalkMatrix():
 

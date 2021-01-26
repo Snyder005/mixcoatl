@@ -1,3 +1,8 @@
+"""Crosstalk database classes and functions.
+
+To Do:
+    * Expand methods for database querying and retrieval of objects.
+"""
 import sqlalchemy as sql
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, backref, sessionmaker, aliased
@@ -12,16 +17,22 @@ Session = sessionmaker()
 
 @contextmanager
 def db_session(database, echo=False):
-    """Create a session bound to the given database.
+    """Define a context manager for a database session.
     
-    Args:
-        database (str): Database filepath.
+    Parameters
+    ----------
+    database : `str` 
+        Filepath to SQLite database.
+    echo : `bool`
+        `True` to enable Engine to log all statements to log handler, which
+        defaults to `sys.stdout`.
     """
+    engine = sql.create_engine('sqlite:///{0}'.format(database), echo=echo)
+    Base.metadata.create_all(engine)
+    Session.configure(bind=engine)
+    session = Session()
+
     try:
-        engine = sql.create_engine('sqlite:///{0}'.format(database), echo=echo)
-        Base.metadata.create_all(engine)
-        Session.configure(bind=engine)
-        session = Session()
         yield session
         session.commit()
     except Exception as e:
@@ -36,22 +47,26 @@ class Result(Base):
     
     ## Columns
     id = sql.Column(sql.Integer, primary_key=True)
-    aggressor_id = sql.Column(sql.Integer, sql.ForeignKey('segment.id'))
-    aggressor_signal = sql.Column(sql.Float)
-    coefficient = sql.Column(sql.Float)
-    error = sql.Column(sql.Float)
-    method = sql.Column(sql.String)
-    victim_id = sql.Column(sql.Integer, sql.ForeignKey('segment.id'))
-    teststand = sql.Column(sql.String)
-    task = sql.Column(sql.String)
+    aggressor_id = sql.Column(sql.Integer, sql.ForeignKey('segment.id'), 
+                              comment='ID for aggressor segment.')
+    victim_id = sql.Column(sql.Integer, sql.ForeignKey('segment.id'), 
+                           comment='ID for victim segment.')
+    aggressor_signal = sql.Column(sql.Float, comment='Pixel signal of aggressor.')
+    coefficient = sql.Column(sql.Float, comment='Crosstalk coefficient.')
+    error = sql.Column(sql.Float, comment='Error estimate for crosstalk coefficient.')
+    methodology = sql.Column(sql.String, comment='Measurement methodology.')
+    image_type = sql.Column(sql.String, comment='Type of image (e.g. satellite).')
+    teststand = sql.Column(sql.String, comment='Laboratory test stand.')
+    analysis = sql.Column(sql.String, comment='Analysis task (e.g. CrosstalkSatelliteTask).')
+    is_coadd = sql.Column(sql.Boolean, comment='Indicator for coadded image.')
 
     ## Relationships
     aggressor = relationship("Segment", back_populates="results", foreign_keys=[aggressor_id])
     victim = relationship("Segment", foreign_keys=[victim_id])
     
     def __repr__(self):
-        return "<Result(aggressor_signal={0:d}, coefficient={1:0.1e}, method='{2}')>".\
-            format(self.aggressor_signal, self.coefficient, self.method)
+        return "<Result(aggressor_signal={0:d}, coefficient={1:0.1e}, methodology='{2}')>".\
+            format(self.aggressor_signal, self.coefficient, self.methodology)
 
     def add_to_db(self, session):
         """Add Result to database."""
@@ -63,9 +78,9 @@ class Segment(Base):
     
     ## Columns
     id = sql.Column(sql.Integer, primary_key=True)
-    segment_name = sql.Column(sql.String)
-    amplifier_number = sql.Column(sql.Integer)
-    sensor_id = sql.Column(sql.Integer, sql.ForeignKey('sensor.id'))
+    segment_name = sql.Column(sql.String, comment='Segment name (e.g. C00).')
+    amplifier_number = sql.Column(sql.Integer, comment='Segment amplifier number.')
+    sensor_id = sql.Column(sql.Integer, sql.ForeignKey('sensor.id'), comment='ID for CCD sensor.')
     
     ## Relationships
     results = relationship("Result", back_populates="aggressor", cascade="all, delete-orphan",
@@ -109,10 +124,10 @@ class Sensor(Base):
     
     ## Columns
     id = sql.Column(sql.Integer, primary_key=True)
-    sensor_name = sql.Column(sql.String)
-    lsst_num = sql.Column(sql.String)
-    manufacturer = sql.Column(sql.String)
-    namps = sql.Column(sql.Integer)
+    sensor_name = sql.Column(sql.String, comment='Sensor name (e.g. R22/S22).')
+    lsst_num = sql.Column(sql.String, comment='LSST project number.')
+    manufacturer = sql.Column(sql.String, comment='Manufacturer (E2V or ITL).')
+    namps = sql.Column(sql.Integer, comment='Number of amplifiers.')
     
     ## Relationships
     segments = relationship("Segment", collection_class=attribute_mapped_collection('amplifier_number'), 
@@ -142,7 +157,7 @@ class Sensor(Base):
         """Add Sensor to database."""
         session.add(self)
 
-def query_results(session, sensor_name, aggressor_amp, victim_amp, methods=None):
+def query_results(session, sensor_name, aggressor_amp, victim_amp, **kwargs):
     """Query database for results."""
     a1 = aliased(Segment)
     a2 = aliased(Segment)
@@ -153,9 +168,16 @@ def query_results(session, sensor_name, aggressor_amp, victim_amp, methods=None)
         filter(a2.amplifier_number == victim_amp).\
         join(Sensor).filter(Sensor.sensor_name == sensor_name)
 
-    if methods is not None:
-        if not isinstance(methods, list):
-            methods = [methods]
-        query = query.filter(Result.method.in_(methods))
+    ## Filter results by columns 
+    if 'methodology' in kwargs:
+        query = query.filter(Result.methodology == kwargs['methodology'])
+    if 'image_type' in kwargs:
+        query = query.filter(Result.image_type == kwargs['image_type'])
+    if 'teststand' in kwargs:
+        query = query.filter(Result.teststand == kwargs['teststand'])
+    if 'analysis' in kwargs:
+        query = query.filter(Result.analysis == kwargs['analysis'])
+    if 'is_coadd' in kwargs:
+        query = query.filter(Result.is_coadd == kwargs['is_coadd'])
 
     return query.all()
