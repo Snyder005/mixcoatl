@@ -60,6 +60,11 @@ class Result(Base):
     analysis = sql.Column(sql.String, comment='Analysis task (e.g. CrosstalkSatelliteTask).')
     is_coadd = sql.Column(sql.Boolean, comment='Indicator for coadded image.')
 
+    ## For testing background
+    z_offset = sql.Column(sql.Float, comment='Background constant offset in Z.', nullable=True)
+    y_tilt = sql.Column(sql.Float, comment='Background tilt in Y.', nullable=True)
+    x_tilt = sql.Column(sql.Float, comment='Background tilt in X.', nullable=True)
+
     ## Relationships
     aggressor = relationship("Segment", back_populates="results", foreign_keys=[aggressor_id])
     victim = relationship("Segment", foreign_keys=[victim_id])
