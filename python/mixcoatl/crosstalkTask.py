@@ -400,7 +400,8 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
                                     aggressor_signal=signal, coefficient=res[0], error=res[4], 
                                     methodology='MODEL_LSQ', teststand=teststand, image_type='satellite',
-                                    analysis='CrosstalkSatelliteTask', is_coadd=is_coadd)
+                                    analysis='CrosstalkSatelliteTask', is_coadd=is_coadd, z_offset=res[1],
+                                    y_tilt=res[2], x_tilt=res[3])
                     result.add_to_db(session)
                     logging.info("{0}  Injested C({1},{2}) for signal {3:.1f}".format(datetime.now(), i, j,
                                                                                       signal))
