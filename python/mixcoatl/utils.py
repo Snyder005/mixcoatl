@@ -90,6 +90,21 @@ def calculate_read_noise(ccd, amp):
     
     return stdev
 
+def calculate_covariance(ccd, amp1, amp2):
+    """Calculate amplifier covariances from serial overscan."""
+
+    overscan = ccd.amp_geom.serial_overscan
+
+    im1 = ccd.bias_subtracted_image(amp1)
+    im2 = ccd.bias_subtracted_image(amp2)
+
+    arr1 = im1.Factory(im1, overscan).getImage().getArray().flatten()
+    arr2 = im2.Factory(im2, overscan).getImage().getArray().flatten()
+    
+    cov = np.cov(np.vstack([arr1, arr2]))
+
+    return cov
+
 class CrosstalkResults(widgets.VBox):
     
     def __init__(self, results, agg, vic):

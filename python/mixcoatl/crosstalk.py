@@ -116,7 +116,8 @@ def crosstalk_model(params, aggressor_imarr):
     
     return model
 
-def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
+def crosstalk_fit(aggressor_stamp, victim_stamp, mask, covariance,
+                  correct_correlation=False):
     """Perform crosstalk victim model least-squares minimization.
 
 
@@ -146,6 +147,18 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
         - Sum of residuals.
         - Reduced degrees of freedom.
     """    
+    noise = np.sqrt(np.trace(covariance))
+
+    ## Reduce correlated noise
+    if correct_correlation:
+        diag = np.diag(covariance)
+        neg_covariance = -1*covariance
+        np.fill_diagonal(covariance, diag)
+        correction = np.random.multivariate_normal([0.0, 0.0], neg_covariance, size=aggressor_stamp.shape)
+
+        aggressor_stamp += correction[:, :, 0]
+        victim_stamp += correction[:, :, 1]
+        noise *= np.sqrt(2)
 
     victim_imarr = np.ma.masked_where(mask, victim_stamp)
 
