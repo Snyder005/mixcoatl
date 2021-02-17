@@ -153,7 +153,7 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, mask, covariance,
     if correct_correlation:
         diag = np.diag(covariance)
         neg_covariance = -1*covariance
-        np.fill_diagonal(covariance, diag)
+        np.fill_diagonal(neg_covariance, diag)
         correction = np.random.multivariate_normal([0.0, 0.0], neg_covariance, size=aggressor_stamp.shape)
 
         aggressor_stamp += correction[:, :, 0]

@@ -22,7 +22,7 @@ from lsst.eotest.sensor.MaskedCCD import MaskedCCD
 from lsst.eotest.sensor.BrightPixels import BrightPixels
 
 from mixcoatl.crosstalk import CrosstalkMatrix, rectangular_mask, satellite_mask, crosstalk_fit
-from mixcoatl.utils import AMP2SEG, calculate_read_noise
+from mixcoatl.utils import AMP2SEG, calculate_read_noise, calculate_covariance
 from mixcoatl.database import Sensor, Segment, Result, db_session
 
 class InterCCDCrosstalkConfig(pexConfig.Config):
@@ -117,6 +117,7 @@ class CrosstalkSpotConfig(pexConfig.Config):
     length = pexConfig.Field("Length of postage stamps in y and x direction", int, default=200)
     threshold = pexConfig.Field("Aggressor spot mean signal threshold", float, default=50000.)
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
+    correct_correlation = pexConfig.Field("Correct for correlated read noise", bool, default=False)
 
 class CrosstalkSpotTask(pipeBase.Task):
 
@@ -154,6 +155,7 @@ class CrosstalkSpotTask(pipeBase.Task):
             ## Set configuration and analysis settings
             length = self.config.length
             threshold = self.config.threshold
+            correct_correlation = self.config.correct_correlation
             if len(infiles) > 1:
                 is_coadd = True
             else:
@@ -182,12 +184,14 @@ class CrosstalkSpotTask(pipeBase.Task):
     
                 ## Victim amplifiers
                 for j in all_amps:
-                    
+
+                    covariance = calculate_covariance(ccds[0], i, j)/float(len(ccds))
                     victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
                     victim_imarr = imutils.stack(victim_images).getArray()
 
                     ## Add crosstalk result to database
-                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=read_noise)
+                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
+                                        correct_correlation=correct_correlation)
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
                                     aggressor_signal=signal, coefficient=res[0], error=res[4],
                                     methodology='MODEL_LSQ', teststand=teststand, image_type='spot',
@@ -201,10 +205,11 @@ class CrosstalkSpotTask(pipeBase.Task):
 class CrosstalkColumnConfig(pexConfig.Config):
 
     database = pexConfig.Field("SQL database DB file", str, default='crosstalk.db')
-    length_y = pexConfig.Field("Length of postage stamps in y-direction", int, default=200)
-    length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=20)
+    length_y = pexConfig.Field("Length of postage stamps in y-direction", int, default=2000)
+    length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=100)
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
     threshold = pexConfig.Field("Aggressor column mean signal threshold", float, default=1000.)
+    correct_correlation = pexConfig.Field("Correct for correlated read noise", bool, default=True)
 
 class CrosstalkColumnTask(pipeBase.Task):
 
@@ -243,6 +248,7 @@ class CrosstalkColumnTask(pipeBase.Task):
             ly = self.config.length_y
             lx = self.config.length_x
             threshold = self.config.threshold
+            correct_correlation = self.config.correct_correlation
             if len(infiles) > 1:
                 is_coadd = True
             else:
@@ -265,8 +271,6 @@ class CrosstalkColumnTask(pipeBase.Task):
                     continue
                 col = columns[0]
 
-                read_noise = calculate_read_noise(ccds[0], i)*np.sqrt(2./len(ccds))
-
                 aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
                 aggressor_imarr = imutils.stack(aggressor_images).getArray()
                 signal = np.mean(aggressor_imarr[:, col])
@@ -275,11 +279,13 @@ class CrosstalkColumnTask(pipeBase.Task):
                 ## Victim amplifiers
                 for j in all_amps:
 
+                    covariance = calculate_covariance(ccds[0], i, j)/float(len(ccds))
                     victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
                     victim_imarr = imutils.stack(victim_images).getArray()
                     
                     ## Add crosstalk result to database
-                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=read_noise)
+                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
+                                        correct_correlation=correct_correlation)
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
                                     aggressor_signal=signal, coefficient=res[0], error=res[4], 
                                     methodology='MODEL_LSQ', image_type='brightcolumn',
@@ -299,6 +305,7 @@ class CrosstalkSatelliteConfig(pexConfig.Config):
     verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
     restrict_to_side = pexConfig.Field("Restrict crosstalk to segment pairs on a single side", 
                                        bool, default=True)
+    correct_correlation = pexConfig.Field("Correct for correlated read noise", bool, default=False)
 
 class CrosstalkSatelliteTask(pipeBase.Task):
 
@@ -340,6 +347,7 @@ class CrosstalkSatelliteTask(pipeBase.Task):
             canny_sigma = self.config.canny_sigma
             low_threshold = self.config.low_threshold
             high_threshold = self.config.high_threshold
+            correct_correlation = self.config.correct_correlation
             if len(infiles) > 1:
                 is_coadd = True
             else:
@@ -366,7 +374,6 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                 if len(angle) != 2:
                     continue
 
-                read_noise = calculate_read_noise(ccds[0], i)*np.sqrt(2./len(ccds))
                 mean_angle = np.mean(angle)
                 mean_dist = np.mean(dist)
                 mask = satellite_mask(aggressor_imarr, mean_angle, mean_dist, width=width)
@@ -382,9 +389,12 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                     vic_amps = all_amps
 
                 for j in vic_amps:
+
+                    covariance = calculate_covariance(ccds[0], i, j)/float(len(ccds))
                     victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
                     victim_imarr = imutils.stack(victim_images).getArray()
-                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, noise=read_noise)
+                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
+                                        correct_correlation=correct_correlation)
 
                     ## Add result to database
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
