@@ -22,7 +22,7 @@ from lsst.eotest.sensor.MaskedCCD import MaskedCCD
 from lsst.eotest.sensor.BrightPixels import BrightPixels
 
 from mixcoatl.crosstalk import CrosstalkMatrix, rectangular_mask, satellite_mask, crosstalk_fit
-from mixcoatl.utils import AMP2SEG, calculate_read_noise, calculate_covariance
+from mixcoatl.utils import AMP2SEG, calculate_covariance
 from mixcoatl.database import Sensor, Segment, Result, db_session
 
 class InterCCDCrosstalkConfig(pexConfig.Config):
@@ -179,8 +179,6 @@ class CrosstalkSpotTask(pipeBase.Task):
                 signal = np.max(smoothed)
                 if signal < self.config.threshold:
                     continue
-                
-                read_noise = calculate_read_noise(ccds[0], i)*np.sqrt(2./len(ccds))
     
                 ## Victim amplifiers
                 for j in all_amps:
@@ -203,16 +201,41 @@ class CrosstalkSpotTask(pipeBase.Task):
 
             logging.info("{0}  Task completed successfully.".format(datetime.now()))
 
-class CrosstalkColumnConfig(pexConfig.Config):
+class CrosstalkColumnConfig(pipeBase.PipelineTaskConfig,
+                            pipelineConnections=pipeBase.PipelineTaskConnections):
 
-    database = pexConfig.Field("SQL database DB file", str, default='crosstalk.db')
-    length_y = pexConfig.Field("Length of postage stamps in y-direction", int, default=2000)
-    length_x = pexConfig.Field("Length of postage stamps in x-direction", int, default=100)
-    verbose = pexConfig.Field("Turn verbosity on", bool, default=True)
-    threshold = pexConfig.Field("Aggressor column mean signal threshold", float, default=1000.)
-    correct_correlation = pexConfig.Field("Correct for correlated read noise", bool, default=True)
+    database = pexConfig.Field(
+        dtype=str,
+        doc="SQL database DB file.", 
+        default='crosstalk.db'
+    )
+    maskLengthY = pexConfig.Field(
+        dtype=int,
+        doc="Length of postage stamp mask in y-direction",
+        default=2000
+    )
+    maskLengthX = pexConfig.Field(
+        dtype=int,
+        doc="Length of postage stamp mask in x-direction.", 
+        default=100
+    )
+    threshold = pexConfig.Field(
+        dtype=float,
+        doc="Aggressor column mean signal threshold",
+        default=1000.
+    )
+    covarianceCorrectionType = pexConfig.ChoiceField(
+        dtype=str,
+        doc="The method for correcting correlated read noise.",
+        default='NONE',
+        allowed={
+            "NONE": "No correction performed.",
+            "RANDOM": "Correct using a random seed.",
+            "SEED" : "Correct using a fixed seed."
+        }
+    )
 
-class CrosstalkColumnTask(pipeBase.Task):
+class CrosstalkColumnTask(pipeBase.PipelineTask):
 
     ConfigClass = CrosstalkColumnConfig
     _DefaultName = "CrosstalkColumnTask"
@@ -221,6 +244,16 @@ class CrosstalkColumnTask(pipeBase.Task):
 
         if not isinstance(infiles, list):
             infiles = [infiles]
+
+        if self.config.covarianceCorrectionType == 'NONE':
+            correct_covariance = False
+            seed = None
+        elif self.config.covarianceCorrectionType == 'RANDOM':
+            correct_covariance = True
+            seed = None
+        elif self.config.covarianceCorrectionType == 'SEED':
+            correct_covariance = True
+            seed = 189
 
         ## Get sensor information from header
         all_amps = imutils.allAmps(infiles[0])
@@ -231,7 +264,6 @@ class CrosstalkColumnTask(pipeBase.Task):
 
         ## Interface with SQL database
         database = self.config.database
-        logging.info("{0}  Running CrosstalkColumnTask using database {1}".format(datetime.now(), database))
         with db_session(database) as session:
 
             ## Get sensor from database
@@ -243,13 +275,7 @@ class CrosstalkColumnTask(pipeBase.Task):
                 sensor.segments = {i : Segment(segment_name=AMP2SEG[i], amplifier_number=i) for i in all_amps}
                 sensor.add_to_db(session)
                 session.commit()
-                logging.info("{0}  New sensor {1} added to database".format(datetime.now(), sensor_name))
 
-            ## Set configuration and analysis settings
-            ly = self.config.length_y
-            lx = self.config.length_x
-            threshold = self.config.threshold
-            correct_correlation = self.config.correct_correlation
             if len(infiles) > 1:
                 is_coadd = True
             else:
@@ -257,16 +283,13 @@ class CrosstalkColumnTask(pipeBase.Task):
             ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
                               linearity_correction=linearity_correction) for infile in infiles]
 
-            logging.info("{0}  ".format(datetime.now()) + \
-                         "Processing files: {}".format(' '.join(map(str, infiles))))
-
             ## Aggressor amplifiers
             for i in all_amps:
 
                 ## Find aggressor regions
                 exptime = 1
                 gain = 1
-                bp = BrightPixels(ccds[0], i, exptime, gain, ethresh=threshold)
+                bp = BrightPixels(ccds[0], i, exptime, gain, ethresh=self.config.threshold)
                 pixels, columns = bp.find()
                 if len(columns) == 0:
                     continue
@@ -275,7 +298,8 @@ class CrosstalkColumnTask(pipeBase.Task):
                 aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
                 aggressor_imarr = imutils.stack(aggressor_images).getArray()
                 signal = np.mean(aggressor_imarr[:, col])
-                mask = rectangular_mask(aggressor_imarr, 1000, col, ly=ly, lx=lx)
+                mask = rectangular_mask(aggressor_imarr, 1000, col, ly=self.config.maskLengthY,
+                                        lx=self.config.maskLengthX)
                 
                 ## Victim amplifiers
                 for j in all_amps:
@@ -286,16 +310,14 @@ class CrosstalkColumnTask(pipeBase.Task):
                     
                     ## Add crosstalk result to database
                     res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
-                                        correct_correlation=correct_correlation)
+                                        correct_covariance=correct_covariance, seed=seed)
+                    print(i, j, res)
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
                                     aggressor_signal=signal, coefficient=res[0], error=res[4], 
                                     methodology='MODEL_LSQ', image_type='brightcolumn',
                                     teststand=teststand, analysis='CrosstalkColumnTask', is_coadd=is_coadd,
                                     z_offset=res[1], y_tilt=res[2], x_tilt=res[3])
                     result.add_to_db(session)
-                    logging.info("{0}  Injested C({1},{2}) for signal {3:.1f}".format(datetime.now(), i, j,
-                                                                                      signal))
-            logging.info("{0}  Task completed successfully.".format(datetime.now()))
 
 class CrosstalkSatelliteConfig(pexConfig.Config):
 
