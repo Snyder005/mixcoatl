@@ -336,7 +336,6 @@ class CrosstalkColumnTask(pipeBase.PipelineTask):
                     ## Add crosstalk result to database
                     res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
                                         correct_covariance=correct_covariance, seed=seed)
-                    print(i, j, res)
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
                                     aggressor_signal=signal, coefficient=res[0], error=res[4], 
                                     methodology='MODEL_LSQ', image_type='brightcolumn',
