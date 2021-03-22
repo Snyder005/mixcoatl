@@ -116,9 +116,9 @@ def crosstalk_model(params, aggressor_imarr):
     
     return model
 
-def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
+def crosstalk_fit(aggressor_stamp, victim_stamp, mask, covariance,
+                  correct_covariance=False, seed=None):
     """Perform crosstalk victim model least-squares minimization.
-
 
     Parameters
     ----------
@@ -128,8 +128,12 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
         2-D victim postage stamp pixel array.
     mask: `numpy.ndarray`, (Ny, Nx)
         2-D mask boolean array.
-    noise : `float`
-        Image read noise.
+    covariance : `numpy.ndarray`, (2, 2)
+        Covariance between read noise of amplifiers.
+    correct_covariance : 'bool'
+        Correct covariance between read noise of amplifiers.
+    seed : `int`
+        Seed to initialize random generator.
 
     Returns
     -------
@@ -146,6 +150,21 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
         - Sum of residuals.
         - Reduced degrees of freedom.
     """    
+    noise = np.sqrt(np.trace(covariance))
+
+    ## Reduce correlated noise
+    if correct_covariance:
+
+        diag = np.diag(covariance)
+        reverse_covariance = -1*covariance
+        np.fill_diagonal(reverse_covariance, diag)
+
+        rng = np.random.default_rng(seed)
+        correction = rng.multivariate_normal([0.0, 0.0], reverse_covariance, size=aggressor_stamp.shape)
+
+        aggressor_stamp += correction[:, :, 0]
+        victim_stamp += correction[:, :, 1]
+        noise *= np.sqrt(2)
 
     victim_imarr = np.ma.masked_where(mask, victim_stamp)
 
