@@ -150,10 +150,7 @@ class CrosstalkSpotTask(pipeBase.Task):
     ConfigClass = CrosstalkSpotConfig
     _DefaultName = "CrosstalkSpotTask"
 
-    def run(self, sensor_name, infiles, bias_frame=None, dark_frame=None, linearity_correction=None):
-
-        if not isinstance(infiles, list):
-            infiles = [infiles]
+    def run(self, sensor_name, infile, bias_frame=None, dark_frame=None, linearity_correction=None):
 
         if self.config.covarianceCorrectionType == 'NONE':
             correct_covariance = False
@@ -166,8 +163,8 @@ class CrosstalkSpotTask(pipeBase.Task):
             seed = 189
 
         ## Get sensor information from header
-        all_amps = imutils.allAmps(infiles[0])
-        with fits.open(infiles[0]) as hdulist:
+        all_amps = imutils.allAmps(infile)
+        with fits.open(infile) as hdulist:
             lsst_num = hdulist[0].header['LSST_NUM']
             teststand = hdulist[0].header['TSTAND']
             manufacturer = lsst_num[:3]
@@ -187,18 +184,13 @@ class CrosstalkSpotTask(pipeBase.Task):
                 session.commit()
 
             ## Set configuration and analysis settings
-            if len(infiles) > 1:
-                is_coadd = True
-            else:
-                is_coadd = False
-            ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
-                              linearity_correction=linearity_correction) for infile in infiles]
+            ccd = MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame, 
+                            linearity_correction=linearity_correction)
 
             ## Aggressor amplifiers
             for i in all_amps:
 
-                aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
-                aggressor_imarr = imutils.stack(aggressor_images).getArray()
+                aggressor_imarr = ccd.unbiased_and_trimmed_image(i).getImage().getArray()
 
                 ## Find aggressor regions
                 smoothed = gaussian_filter(aggressor_imarr, 20)
@@ -212,9 +204,8 @@ class CrosstalkSpotTask(pipeBase.Task):
                 ## Victim amplifiers
                 for j in all_amps:
 
-                    covariance = calculate_covariance(ccds[0], i, j)/float(len(ccds))
-                    victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
-                    victim_imarr = imutils.stack(victim_images).getArray()
+                    covariance = calculate_covariance(ccd, i, j)
+                    victim_imarr = ccd.unbiased_and_trimmed_image(j).getImage().getArray()
 
                     ## Add crosstalk result to database
                     res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
@@ -222,8 +213,8 @@ class CrosstalkSpotTask(pipeBase.Task):
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
                                     aggressor_signal=signal, coefficient=res[0], error=res[4],
                                     methodology='MODEL_LSQ', teststand=teststand, image_type='spot',
-                                    analysis='CrosstalkSpotTask', is_coadd=is_coadd, z_offset=res[1], 
-                                    y_tilt=res[2], x_tilt=res[3])
+                                    analysis='CrosstalkSpotTask', image_file=os.path.basename(infile),
+                                    z_offset=res[1], y_tilt=res[2], x_tilt=res[3])
                     result.add_to_db(session)
                     
 class CrosstalkColumnConfig(pipeBase.PipelineTaskConfig,
@@ -265,10 +256,7 @@ class CrosstalkColumnTask(pipeBase.PipelineTask):
     ConfigClass = CrosstalkColumnConfig
     _DefaultName = "CrosstalkColumnTask"
 
-    def run(self, sensor_name, infiles, bias_frame=None, dark_frame=None, linearity_correction=None):
-
-        if not isinstance(infiles, list):
-            infiles = [infiles]
+    def run(self, sensor_name, infile, bias_frame=None, dark_frame=None, linearity_correction=None):
 
         if self.config.covarianceCorrectionType == 'NONE':
             correct_covariance = False
@@ -281,8 +269,8 @@ class CrosstalkColumnTask(pipeBase.PipelineTask):
             seed = 189
 
         ## Get sensor information from header
-        all_amps = imutils.allAmps(infiles[0])
-        with fits.open(infiles[0]) as hdulist:
+        all_amps = imutils.allAmps(infile)
+        with fits.open(infile) as hdulist:
             lsst_num = hdulist[0].header['LSST_NUM']
             teststand = hdulist[0].header['TSTAND']
             manufacturer = lsst_num[:3]
@@ -301,12 +289,8 @@ class CrosstalkColumnTask(pipeBase.PipelineTask):
                 sensor.add_to_db(session)
                 session.commit()
 
-            if len(infiles) > 1:
-                is_coadd = True
-            else:
-                is_coadd = False
-            ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
-                              linearity_correction=linearity_correction) for infile in infiles]
+            ccd = MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame, 
+                            linearity_correction=linearity_correction)
 
             ## Aggressor amplifiers
             for i in all_amps:
@@ -314,14 +298,13 @@ class CrosstalkColumnTask(pipeBase.PipelineTask):
                 ## Find aggressor regions
                 exptime = 1
                 gain = 1
-                bp = BrightPixels(ccds[0], i, exptime, gain, ethresh=self.config.threshold)
+                bp = BrightPixels(ccd, i, exptime, gain, ethresh=self.config.threshold)
                 pixels, columns = bp.find()
                 if len(columns) == 0:
                     continue
                 col = columns[0]
 
-                aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
-                aggressor_imarr = imutils.stack(aggressor_images).getArray()
+                aggressor_imarr = ccd.unbiased_and_trimmed_image(i).getImage().getArray()
                 signal = np.mean(aggressor_imarr[:, col])
                 mask = rectangular_mask(aggressor_imarr, 1000, col, ly=self.config.maskLengthY,
                                         lx=self.config.maskLengthX)
@@ -329,9 +312,8 @@ class CrosstalkColumnTask(pipeBase.PipelineTask):
                 ## Victim amplifiers
                 for j in all_amps:
 
-                    covariance = calculate_covariance(ccds[0], i, j)/float(len(ccds))
-                    victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
-                    victim_imarr = imutils.stack(victim_images).getArray()
+                    covariance = calculate_covariance(ccd, i, j)
+                    victim_imarr = ccd.unbiased_and_trimmed_image(j).getImage().getArray()
                     
                     ## Add crosstalk result to database
                     res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
@@ -339,8 +321,9 @@ class CrosstalkColumnTask(pipeBase.PipelineTask):
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
                                     aggressor_signal=signal, coefficient=res[0], error=res[4], 
                                     methodology='MODEL_LSQ', image_type='brightcolumn',
-                                    teststand=teststand, analysis='CrosstalkColumnTask', is_coadd=is_coadd,
-                                    z_offset=res[1], y_tilt=res[2], x_tilt=res[3])
+                                    teststand=teststand, analysis='CrosstalkColumnTask', 
+                                    image_file=os.path.basename(infile), z_offset=res[1], y_tilt=res[2], 
+                                    x_tilt=res[3])
                     result.add_to_db(session)
 
 class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
@@ -392,10 +375,7 @@ class CrosstalkSatelliteTask(pipeBase.Task):
     ConfigClass = CrosstalkSatelliteConfig
     _DefaultName = "CrosstalkSatelliteTask"
 
-    def run(self, sensor_name, infiles, bias_frame=None, dark_frame=None, linearity_correction=None):
-
-        if not isinstance(infiles, list):
-            infiles = [infiles]
+    def run(self, sensor_name, infile, bias_frame=None, dark_frame=None, linearity_correction=None):
 
         if self.config.covarianceCorrectionType == 'NONE':
             correct_covariance = False
@@ -408,8 +388,8 @@ class CrosstalkSatelliteTask(pipeBase.Task):
             seed = 189
 
         ## Get sensor information from header
-        all_amps = imutils.allAmps(infiles[0])
-        with fits.open(infiles[0]) as hdulist:
+        all_amps = imutils.allAmps(infile)
+        with fits.open(infile) as hdulist:
             lsst_num = hdulist[0].header['LSST_NUM']
             teststand = hdulist[0].header['TSTAND']
             manufacturer = lsst_num[:3]
@@ -428,18 +408,13 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                 sensor.add_to_db(session)
                 session.commit()
 
-            if len(infiles) > 1:
-                is_coadd = True
-            else:
-                is_coadd = False
-            ccds = [MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame,
-                              linearity_correction=linearity_correction) for infile in infiles]
+            ccd = MaskedCCD(infile, bias_frame=bias_frame, dark_frame=dark_frame, 
+                            linearity_correction=linearity_correction)
 
             ## Aggressor amplifiers
             for i in all_amps:
 
-                aggressor_images = [ccd.unbiased_and_trimmed_image(i).getImage() for ccd in ccds]
-                aggressor_imarr = imutils.stack(aggressor_images).getArray()
+                aggressor_imarr = ccd.unbiased_and_trimmed_image(i).getImage().getArray()
 
                 ## Find aggressor regions
                 tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 1000)
@@ -468,9 +443,9 @@ class CrosstalkSatelliteTask(pipeBase.Task):
 
                 for j in vic_amps:
 
-                    covariance = calculate_covariance(ccds[0], i, j)/float(len(ccds))
-                    victim_images = [ccd.unbiased_and_trimmed_image(j).getImage() for ccd in ccds]
-                    victim_imarr = imutils.stack(victim_images).getArray()
+                    covariance = calculate_covariance(ccd, i, j)
+                    victim_imarr = ccd.unbiased_and_trimmed_image(j).getImage().getArray()
+
                     res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
                                         correct_covariance=correct_covariance, seed=seed)
 
@@ -478,6 +453,6 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
                                     aggressor_signal=signal, coefficient=res[0], error=res[4], 
                                     methodology='MODEL_LSQ', teststand=teststand, image_type='satellite',
-                                    analysis='CrosstalkSatelliteTask', is_coadd=is_coadd, z_offset=res[1],
-                                    y_tilt=res[2], x_tilt=res[3])
+                                    analysis='CrosstalkSatelliteTask', image_file=os.path.basename(infile), 
+                                    z_offset=res[1], y_tilt=res[2], x_tilt=res[3])
                     result.add_to_db(session)
