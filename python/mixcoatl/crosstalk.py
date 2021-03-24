@@ -4,7 +4,7 @@ This module contains a number of function and class definitions that are used
 for performing the measurement of electronic crosstalk in multi-segmented CCD
 images.
 """
-
+import copy
 import numpy as np
 from astropy.io import fits
 
@@ -116,7 +116,7 @@ def crosstalk_model(params, aggressor_imarr):
     
     return model
 
-def crosstalk_fit(aggressor_stamp, victim_stamp, mask, covariance,
+def crosstalk_fit(aggressor_array, victim_array, mask, covariance,
                   correct_covariance=False, seed=None):
     """Perform crosstalk victim model least-squares minimization.
 
@@ -151,6 +151,8 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, mask, covariance,
         - Reduced degrees of freedom.
     """    
     noise = np.sqrt(np.trace(covariance))
+    aggressor_imarr = copy.deepcopy(aggressor_array)
+    victim_imarr = copy.deepcopy(victim_array)
 
     ## Reduce correlated noise
     if correct_covariance:
@@ -160,25 +162,25 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, mask, covariance,
         np.fill_diagonal(reverse_covariance, diag)
 
         rng = np.random.default_rng(seed)
-        correction = rng.multivariate_normal([0.0, 0.0], reverse_covariance, size=aggressor_stamp.shape)
+        correction = rng.multivariate_normal([0.0, 0.0], reverse_covariance, size=aggressor_imarr.shape)
 
-        aggressor_stamp += correction[:, :, 0]
-        victim_stamp += correction[:, :, 1]
+        aggressor_imarr += correction[:, :, 0]
+        victim_imarr += correction[:, :, 1]
         noise *= np.sqrt(2)
 
-    victim_imarr = np.ma.masked_where(mask, victim_stamp)
+    victim_stamp = np.ma.masked_where(mask, victim_imarr)
 
     ## Construct masked, compressed basis arrays
-    ay, ax = aggressor_stamp.shape
+    ay, ax = aggressor_imarr.shape
     Z = np.ma.masked_where(mask, np.ones((ay, ax))).compressed()
     Y, X = np.mgrid[:ay, :ax]
     Y = np.ma.masked_where(mask, Y).compressed()
     X = np.ma.masked_where(mask, X).compressed()
-    aggressor_imarr = np.ma.masked_where(mask, aggressor_stamp).compressed()
+    aggressor_stamp = np.ma.masked_where(mask, aggressor_imarr).compressed()
 
     ## Perform least squares parameter estimation
-    b = victim_imarr.compressed()/noise
-    A = np.vstack([aggressor_imarr, Z, Y, X]).T/noise
+    b = victim_stamp.compressed()/noise
+    A = np.vstack([aggressor_stamp, Z, Y, X]).T/noise
     params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
     covar = np.linalg.inv(np.dot(A.T, A))
     dof = b.shape[0] - 4
