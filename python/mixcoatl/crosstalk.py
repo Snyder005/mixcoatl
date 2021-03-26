@@ -33,9 +33,9 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
     """
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
-    mask = (np.abs(Y - y_center) > ly/2.) | (np.abs(X - x_center) > lx/2.)
+    select = (np.abs(Y - y_center) < ly/2.) & (np.abs(X - x_center) < lx/2.)
 
-    return mask
+    return select
 
 def satellite_mask(imarr, angle, distance, width):
     """Make a pixel mask along a target line.
@@ -59,9 +59,9 @@ def satellite_mask(imarr, angle, distance, width):
     """
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
-    mask = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) > width
+    select = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) < width
 
-    return mask
+    return select
 
 def circular_mask(imarr, y_center, x_center, radius):
     """Make a circular pixel mask.
@@ -116,7 +116,7 @@ def crosstalk_model(params, aggressor_imarr):
     
     return model
 
-def crosstalk_fit(aggressor_array, victim_array, mask, covariance,
+def crosstalk_fit(aggressor_array, victim_array, select, covariance,
                   correct_covariance=False, seed=None):
     """Perform crosstalk victim model least-squares minimization.
 
@@ -168,18 +168,18 @@ def crosstalk_fit(aggressor_array, victim_array, mask, covariance,
         victim_imarr += correction[:, :, 1]
         noise *= np.sqrt(2)
 
-    victim_stamp = np.ma.masked_where(mask, victim_imarr)
+    victim_stamp = victim_imarr[select]
 
     ## Construct masked, compressed basis arrays
     ay, ax = aggressor_imarr.shape
-    Z = np.ma.masked_where(mask, np.ones((ay, ax))).compressed()
+    Z = np.ones((ay, ax))[select]
     Y, X = np.mgrid[:ay, :ax]
-    Y = np.ma.masked_where(mask, Y).compressed()
-    X = np.ma.masked_where(mask, X).compressed()
-    aggressor_stamp = np.ma.masked_where(mask, aggressor_imarr).compressed()
+    Y = Y[select]
+    X = X[select]
+    aggressor_stamp = aggressor_imarr[select]
 
     ## Perform least squares parameter estimation
-    b = victim_stamp.compressed()/noise
+    b = victim_stamp/noise
     A = np.vstack([aggressor_stamp, Z, Y, X]).T/noise
     params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
     covar = np.linalg.inv(np.dot(A.T, A))
