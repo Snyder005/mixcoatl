@@ -195,7 +195,7 @@ class CrosstalkSpotTask(pipeBase.Task):
                 ## Find aggressor regions
                 smoothed = gaussian_filter(aggressor_imarr, 20)
                 y, x = np.unravel_index(smoothed.argmax(), smoothed.shape)
-                mask = rectangular_mask(aggressor_imarr, y, x, ly=self.config.maskLengthY, 
+                select = rectangular_mask(aggressor_imarr, y, x, ly=self.config.maskLengthY, 
                                         lx=self.config.maskLengthX)
                 signal = np.max(smoothed)
                 if signal < self.config.threshold:
@@ -208,7 +208,7 @@ class CrosstalkSpotTask(pipeBase.Task):
                     victim_imarr = ccd.unbiased_and_trimmed_image(j).getImage().getArray()
 
                     ## Add crosstalk result to database
-                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
+                    res = crosstalk_fit(aggressor_imarr, victim_imarr, select, covariance=covariance,
                                         correct_covariance=correct_covariance, seed=seed)
                     result = Result(aggressor_id=sensor.segments[i].id, victim_id=sensor.segments[j].id,
                                     aggressor_signal=signal, coefficient=res[0], error=res[4],
@@ -337,7 +337,7 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
     maskWidth = pexConfig.Field(
         dtype=int,
         doc="Width of satellite streak mask.", 
-        default=100
+        default=50
     )
     cannySigma = pexConfig.Field(
         dtype=float,
@@ -429,8 +429,8 @@ class CrosstalkSatelliteTask(pipeBase.Task):
 
                 mean_angle = np.mean(angle)
                 mean_dist = np.mean(dist)
-                mask = satellite_mask(aggressor_imarr, mean_angle, mean_dist, width=self.config.maskWidth)
-                signal = np.max(aggressor_imarr[~mask])
+                select = satellite_mask(aggressor_imarr, mean_angle, mean_dist, width=self.config.maskWidth)
+                signal = np.max(aggressor_imarr[select])
                 
                 ## Victim amplifiers
                 if self.config.restrictSide:
@@ -446,7 +446,7 @@ class CrosstalkSatelliteTask(pipeBase.Task):
                     covariance = calculate_covariance(ccd, i, j)
                     victim_imarr = ccd.unbiased_and_trimmed_image(j).getImage().getArray()
 
-                    res = crosstalk_fit(aggressor_imarr, victim_imarr, mask, covariance=covariance,
+                    res = crosstalk_fit(aggressor_imarr, victim_imarr, select, covariance=covariance,
                                         correct_covariance=correct_covariance, seed=seed)
 
                     ## Add result to database
