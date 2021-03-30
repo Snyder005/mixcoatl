@@ -300,10 +300,13 @@ def fit_check(srcX, srcY, gX, gY, ccd_type):
     """Returns the X & Y residuals of the fit, number of identified 
        stars, and number of missing stars (ideal grid points
        without corresponding stars)"""
-    arr = []
+
     residualsX = []
     residualsY = []
     identified_points = [[x,y] for x,y in zip(srcX, srcY)]
+    
+    # Total number of identified stars
+    nsources = len(identified_points)
     
     # Mask the points to the CCD bounds (not exact for now)
     if ccd_type == 'ITL':
@@ -323,15 +326,20 @@ def fit_check(srcX, srcY, gX, gY, ccd_type):
         closest = sorted(sourcegrid_points, key=lambda pt : distance.euclidean(pt, ipt))[0]
         residualsX.append(closest[0]-ipt[0])
         residualsY.append(closest[1]-ipt[1])
-        if (closest[0]-ipt[0]) < -100: arr.append(ipt)
+
+
+    # Calculate the outlier points
+    outliersX = np.array(identified_points)
+    outliersY = np.array(identified_points)
+    rX = np.array(residualsX)
+    rY = np.array(residualsY)
+    outliersX = outliersX[(rX < np.quantile(rX, 0.1)) | (rX > np.quantile(rX, 0.9))].tolist()
+    outliersY = outliersY[(rY < np.quantile(rY, 0.1)) | (rY > np.quantile(rY, 0.9))].tolist()
     
     # Calculate number of identified stars have a corresponding grid point within 20px
     count = 0
     for sgpt in sourcegrid_points:
         closest = sorted(identified_points, key=lambda pt : distance.euclidean(pt, sgpt))[0]
         if distance.euclidean(closest, sgpt) < 20: count = count + 1
-    
-    # Total number of identified stars
-    nsources = len(residualsX)
 
-    return residualsX, residualsY, nsources, len(sourcegrid_points) - count
+    return residualsX, residualsY, nsources, len(sourcegrid_points) - count, outliersX, outliersY
