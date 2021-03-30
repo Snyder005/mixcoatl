@@ -11,7 +11,7 @@ import os
 import scipy
 import numpy as np
 from astropy.io import fits
-from lmfit import Minimizer, Parameters
+from lmfit import Minimizer, Parameters, fit_report
 from scipy import optimize
 from scipy.spatial import distance
 from itertools import product
@@ -228,12 +228,11 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
 
     ## Calculate residuals   
     indices, distances = coordinate_distances(srcY, srcX, gY, gX)
-
+    #print((x0,y0,theta,np.sum(distances[:,0])))
     return distances[:, 0]
 
-def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows, brute_search=False, 
-             vary_theta=False, method='least_squares', normalized_shifts=None, 
-             ccd_geom=None):
+def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows, vary_theta=False,
+             method='least_squares', normalized_shifts=None, ccd_geom=None):
 
     ## Calculate mean xstep/ystep
     nsources = srcY.shape[0]
@@ -279,33 +278,27 @@ def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows, brute_search=False,
     params = Parameters()
     params.add('ystep', value=ystep, vary=False)
     params.add('xstep', value=xstep, vary=False)
-    params.add('theta', value=theta, vary=False)
-
-    ## Optionally perform initial brute search
-    params.add('y0', value=y0_guess, min=y0_guess-ystep/3., max=y0_guess+ystep/3., 
-               vary=True, brute_step=ystep/6.)
-    params.add('x0', value=x0_guess, min=x0_guess-xstep/3., max=x0_guess+xstep/3., 
-               vary=True, brute_step=xstep/6.)
-    if brute_search:
-        minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
-                           fcn_kws={'normalized_shifts' : normalized_shifts,
-                                    'ccd_geom' : ccd_geom},
-                           nan_policy='omit')
-        result = minner.minimize(method='brute', params=params)
-        params = result.params
-        parvals = params.valuesdict()
-        params['y0'].set(min=parvals['y0']-ystep/3., max=parvals['y0']+ystep/3.)
-        params['x0'].set(min=parvals['x0']-xstep/3., max=parvals['x0']+xstep/3.)
-
-    ## Optionally enable parameter fit to theta
-    if vary_theta:
-        params['theta'].set(vary=True, min=theta-5*np.pi/180., max=theta+5*np.pi/180.)
-
-    ## LM Fit
+    params.add('y0', value=y0_guess, min=y0_guess-3., max=y0_guess+3., vary=True)
+    params.add('x0', value=x0_guess, min=x0_guess-3., max=x0_guess+3., vary=True)
+    params.add('theta', value=theta, min=theta-0.5*np.pi/180., max=theta+0.5*np.pi/180., vary=False)
+    
     minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
                        fcn_kws={'normalized_shifts' : normalized_shifts,
-                                'ccd_geom' : ccd_geom},
-                       nan_policy='omit')
-    result = minner.minimize(params=params, method=method, max_nfev=400)
+                                'ccd_geom' : ccd_geom}, nan_policy='omit')
+    result = minner.minimize(params=params, method=method, max_nfev=None)
+    x0result = result.params['x0']
+    y0result = result.params['y0']
 
+    if vary_theta:
+        result_params = result.params
+        result_values = result_params.valuesdict()
+        params['y0'].set(value=result_values['y0'], vary=False)
+        params['x0'].set(value=result_values['x0'], vary=False)
+        params['theta'].set(vary=True)
+        theta_minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
+                       fcn_kws={'normalized_shifts' : normalized_shifts,
+                                'ccd_geom' : ccd_geom}, nan_policy='omit')
+        theta_result = theta_minner.minimize(params=params, method=method, max_nfev=None)
+        result.params['theta'] = theta_result.params['theta']
+    
     return result
