@@ -56,7 +56,7 @@ class GridFitTask(pipeBase.Task):
 
             all_srcY = src[1].data[y_kwd]
             all_srcX = src[1].data[x_kwd]
-            points = np.asarray([[y,x] for y,x in zip(all_srcY,all_srcX)])
+            allsrc_points = np.asarray([[x,y] for x,y in zip(all_srcX,all_srcY)])
             
             # Mask the bad grid points
             quality_mask = (src[1].data['base_SdssShape_XX'] > 4.5)*(src[1].data['base_SdssShape_XX'] < 7.) \
@@ -64,8 +64,8 @@ class GridFitTask(pipeBase.Task):
 
             # Mask points without at least two neighbors
             outlier_mask = []
-            for pt in points:
-                distances = np.sort([distance.euclidean(pt,p) for p in points])[1:]
+            for pt in allsrc_points:
+                distances = np.sort([distance.euclidean(pt,p) for p in allsrc_points])[1:]
                 count = 0
                 for d in distances:
                     if(d > 40) & (d < 100.) & (count < 2): 
@@ -108,16 +108,27 @@ class GridFitTask(pipeBase.Task):
 
             ## Match grid to catalog
             gY, gX = grid.get_source_centroids()
-            indices, dist = coordinate_distances(gY, gX, all_srcY, all_srcX)
-            nn_indices = indices[:, 0]
 
-            ## Populate grid information
-            grid_index = np.full(all_srcX.shape[0], np.nan)
-            grid_y = np.full(all_srcX.shape[0], np.nan)
-            grid_x = np.full(all_srcX.shape[0], np.nan)
-            grid_y[nn_indices] = gY
-            grid_x[nn_indices] = gX
-            grid_index[nn_indices] = np.arange(49*49)
+            identified_points = [[x,y] for x,y in zip(self.srcX, self.srcY)]
+            sourcegrid_points = [[x,y] for x,y in zip(gX, gY)]
+
+            grid_index = np.full(len(allsrc_points), np.nan)
+            grid_y = np.full(len(allsrc_points), np.nan)
+            grid_x = np.full(len(allsrc_points), np.nan)
+            
+            
+            for ipt in identified_points:
+                index = 0
+                for i in range(len(allsrc_points)):
+                    if np.array_equal(allsrc_points[i], ipt):
+                        index = i
+                        break
+
+                closest_index = np.argmin([distance.euclidean(pt, ipt) for pt in sourcegrid_points])
+                grid_y[index] = gY[closest_index]
+                grid_x[index] = gX[closest_index]
+                grid_index[index] = closest_index
+
 
             ## Merge tables
             new_cols = fits.ColDefs([fits.Column(name='spotgrid_index', 
