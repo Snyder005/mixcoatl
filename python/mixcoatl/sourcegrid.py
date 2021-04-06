@@ -44,7 +44,6 @@ class DistortedGrid:
         """Initialize DistortedGrid instance from a FITS file."""
 
         with fits.open(infile) as hdulist:
-
             x0 = hdulist['GRID_INFO'].header['X0']
             y0 = hdulist['GRID_INFO'].header['Y0']
             theta = hdulist['GRID_INFO'].header['THETA']
@@ -53,8 +52,8 @@ class DistortedGrid:
             ncols = hdulist['GRID_INFO'].header['NCOLS']
             nrows = hdulist['GRID_INFO'].header['NROWS']
 
-            norm_dy = hdulist['GRID_INFO'].data['NORMALIZED_DY']
-            norm_dx = hdulist['GRID_INFO'].data['NORMALIZED_DX']
+            norm_dy = hdulist[-1].data['NORMALIZED_DY']
+            norm_dx = hdulist[-1].data['NORMALIZED_DX']
 
         return cls(ystep, xstep, theta, y0, x0, nrows, ncols, 
                    normalized_shifts=(norm_dy, norm_dx))
