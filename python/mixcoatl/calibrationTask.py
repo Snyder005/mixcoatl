@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import os
 import sys
 import glob
@@ -6,6 +5,8 @@ import numpy as np
 import argparse
 from astropy.io import fits
 from astropy.table import Table, vstack
+import lsst.pex.config as pexConfig
+import lsst.pipe.base as pipeBase
 sys.path.insert(0,'/home/abrought/mixcoatl/python/mixcoatl/')
 sys.path.insert(0,'/home/abrought/mixcoatl/python/')
 from mixcoatl.sourcegrid import DistortedGrid
@@ -104,56 +105,65 @@ cols_to_aggregate = ['spotgrid_index',
                     'base_Variance_value',
                     'base_ClassificationExtendedness_value',
                     'base_FootprintArea_value']
+        
 
-
-def main(infiles, output_dir='./', ncols=49, nrows=49):
+class CalibrationConfig(pexConfig.Config):
+    """Configuration for Calibration Task"""
     
-    ## Initialize data from distorted_grid
-    all_xstep = np.zeros(len(infiles))
-    all_ystep = np.zeros(len(infiles))
-    all_theta = np.zeros(len(infiles))
-    all_data_tables = []
+    ncols = pexConfig.Field("Number of ideal grid columns", int, default=49)
+    nrows = pexConfig.Field("Number of ideal grid rows", int, default=49)
+    output_dir = pexConfig.Field("Output directory", str, default="./")
+    outfile = pexConfig.Field("Output filename", str, default="optical_distortion_grid.fits")
 
-    for i, infile in enumerate(infiles):
-        grid = DistortedGrid.from_fits(infile)
 
-        all_xstep[i] = grid.xstep
-        all_ystep[i] = grid.ystep
-        all_theta[i] = grid.theta
-
-        with fits.open(infile) as hdulist:
-            all_data_tables.append(Table(hdulist[1].data))
-
+class CalibrationTask(pipeBase.Task):
+    """Task to combine distorted grid fits."""
     
-    ## Compute data means
-    mean_xstep = np.nanmean(all_xstep)
-    mean_ystep = np.nanmean(all_ystep)
-    mean_theta = np.nanmean(all_theta)
-    mean_data_table = vstack(all_data_tables, join_type='exact').group_by('spotgrid_index')
-    mean_data_table = mean_data_table[cols_to_aggregate].groups.aggregate(np.nanmean)
+    ConfigClass = CalibrationConfig
+    _DefaultName = "CalibrationTask"
+    
+    @pipeBase.timeMethod
+    def run(self, infiles):
+
+        ## Initialize data from distorted_grid
+        all_xstep = np.zeros(len(infiles))
+        all_ystep = np.zeros(len(infiles))
+        all_theta = np.zeros(len(infiles))
+        all_data_tables = []
+
+        for i, infile in enumerate(infiles):
+            grid = DistortedGrid.from_fits(infile)
+
+            all_xstep[i] = grid.xstep
+            all_ystep[i] = grid.ystep
+            all_theta[i] = grid.theta
+
+            with fits.open(infile) as hdulist:
+                all_data_tables.append(Table(hdulist[1].data))
 
 
-    ## Create and save optical distortions grid
-    grid = DistortedGrid(mean_ystep, mean_xstep, mean_theta, 0., 0., ncols, nrows)
-    grid.make_source_grid()
-    gY = grid._y
-    gX = grid._x
+        ## Compute data means
+        mean_xstep = np.nanmean(all_xstep)
+        mean_ystep = np.nanmean(all_ystep)
+        mean_theta = np.nanmean(all_theta)
+        mean_data_table = vstack(all_data_tables, join_type='exact').group_by('spotgrid_index')
+        mean_data_table = mean_data_table[cols_to_aggregate].groups.aggregate(np.nanmean)
 
-    optics_grid = DistortedGrid(mean_ystep, mean_xstep, mean_theta, 0., 0., ncols, nrows, (gY,gX))
 
-    prihdr = fits.Header()
-    prihdu = fits.PrimaryHDU(header=prihdr)
-    gridhdu = optics_grid.make_grid_hdu()
-    tablehdu = fits.BinTableHDU(mean_data_table)
+        ## Create and save optical distortions grid
+        grid = DistortedGrid(mean_ystep, mean_xstep, mean_theta, 0., 0., self.config.ncols, self.config.nrows)
+        grid.make_source_grid()
+        gY = grid._y
+        gX = grid._x
 
-    hdulist = fits.HDUList([prihdu, gridhdu, tablehdu])
-    hdulist.writeto(os.path.join('./', 'optical_distortion_grid.fits'), overwrite=True)
+        optics_grid = DistortedGrid(mean_ystep, mean_xstep, mean_theta, 0., 0., self.config.ncols, self.config.nrows, (gY,gX))
 
-if __name__ == '__main__':
+        prihdr = fits.Header()
+        prihdu = fits.PrimaryHDU(header=prihdr)
+        gridhdu = optics_grid.make_grid_hdu()
+        tablehdu = fits.BinTableHDU(mean_data_table)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('infiles', nargs='+')
-    parser.add_argument('--output_dir', '-o', type=str, default='./')
-    args = parser.parse_args()
+        hdulist = fits.HDUList([prihdu, gridhdu, tablehdu])
+        hdulist.writeto(os.path.join(self.config.output_dir, self.config.outfile), overwrite=True)
 
-    main(args.infiles, output_dir=args.output_dir)
+        return
