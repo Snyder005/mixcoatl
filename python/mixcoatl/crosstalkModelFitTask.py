@@ -163,6 +163,7 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
         sourceChip = sourceDetector.getName()
         sourceIm = sourceExp.getMaskedImage()
         bad = sourceIm.getMask().getPlaneBitMask(badPixels)
+        self.log.info("Measuring crosstalk from source: %s", sourceChip)
 
         ratioDict = defaultdict(lambda: defaultdict(list))
         extractedCount = 0
@@ -178,8 +179,9 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
             select = rectangular_mask(sourceAmpArray, 1000, columns[0], ly=self.config.maskLengthY, 
                                       lx=self.config.maskLengthX)
             signal = np.mean(sourceAmpArray[:, columns[0]])
+            self.log.debug("  Source amplifier: %s", sourceAmpName)
 
-            outputFluxes[sourceChip][sourceAmpName] = [signal]
+            outputFluxes[sourceChip][sourceAmpName] = [float(signal)]
 
             for targetAmp in targetDetector:
                 # iterate over targetExposure
@@ -187,6 +189,7 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
                 if sourceAmpName == targetAmpName and sourceChip == targetChip:
                     ratioDict[sourceAmpName][targetAmpName] = []
                     continue
+                self.log.debug("    Target amplifier: %s", targetAmpName)
 
                 targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
                                                            targetAmp, sourceAmp,
@@ -194,9 +197,11 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
                 targetAmpArray = targetAmpImage.array
                 results = crosstalk_fit(sourceAmpArray, targetAmpArray, select, covariance=covariance)
 
-                ratioDict[targetAmpName][sourceAmpName] = [results[0]]
+                ratioDict[targetAmpName][sourceAmpName] = [float(results[0])]
                 extractedCount += 1
 
+        self.log.info("Extracted %d pixels from %s -> %s",
+                      extractedCount, sourceChip, targetChip)
         outputRatios[targetChip][sourceChip] = ratioDict
         
         return pipeBase.Struct(
