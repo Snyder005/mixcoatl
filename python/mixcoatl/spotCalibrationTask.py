@@ -107,7 +107,7 @@ cols_to_aggregate = ['spotgrid_index',
                     'base_FootprintArea_value']
         
 
-class CalibrationConfig(pexConfig.Config):
+class SpotCalibrationConfig(pexConfig.Config):
     """Configuration for Calibration Task"""
     
     ncols = pexConfig.Field("Number of ideal grid columns", int, default=49)
@@ -116,7 +116,7 @@ class CalibrationConfig(pexConfig.Config):
     outfile = pexConfig.Field("Output filename", str, default="optical_distortion_grid.fits")
 
 
-class CalibrationTask(pipeBase.Task):
+class SpotCalibrationTask(pipeBase.Task):
     """Task to combine distorted grid fits."""
     
     ConfigClass = CalibrationConfig
