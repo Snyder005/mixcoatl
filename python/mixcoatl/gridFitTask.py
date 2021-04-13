@@ -1,3 +1,9 @@
+"""
+To Do:
+    1. Get CCD geometry information using DM tools and replace existing AMP_GEOM
+    2. Add optics_distortion_grid information to Connections (as another source catalog, maybe?)
+    3. Update modification of the source catalog to use DM tools.
+"""
 import os
 import numpy as np
 from os.path import join
@@ -6,42 +12,71 @@ from scipy.spatial import distance
 
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
+import lsst.pipe.base.connectionTypes as cT
+from lsst.pex.config import Field
 
 from .sourcegrid import DistortedGrid, grid_fit, coordinate_distances
 from .utils import ITL_AMP_GEOM, E2V_AMP_GEOM
 
-class GridFitConfig(pexConfig.Config):
+class GridFitConnections(pipeBase.PipelineTaskConnections, 
+                         dimensions=("instrument", "exposure", "detector")):
+
+    inputCat = cT.Input(
+        doc="Source catalog produced in calibrate task.",
+        name='src',
+        storageClass="SourceCatalog",
+        dimensions=("instrument", "exposure", "detector")
+    )
+
+    vaSourceCat = cT.Output(
+        doc="Value added source catalog produced by grid fit task.",
+        name="vaSrc",
+        storageClass="SourceCatalog",
+        dimensions=("instrument", "exposure", "detector")
+    )
+
+class GridFitConfig(pipebase.PipelineTaskConfig,
+                    pipelineConnections=GridFitConnections):
     """Configuration for GridFitTask."""
 
-    nrows = pexConfig.Field("Number of grid rows.", int, default=49)
-    ncols = pexConfig.Field("Number of grid columns.", int, default=49)
-    y_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                            default='base_SdssCentroid_Y')
-    x_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                            default='base_SdssCentroid_X')
-    xx_kwd = pexConfig.Field('Source catalog xx-shape keyword', str, 
-                             default="base_SdssShape_XX")
-    yy_kwd = pexConfig.Field('Source catalog yy-shape keyword', str,
-                             default="base_SdssShape_YY")
-    vary_theta = pexConfig.Field("Vary theta parameter during fit", bool,
-                                 default=True)
-    fit_method = pexConfig.Field("Method for fit", str,
-                                 default='least_squares')
-    outfile = pexConfig.Field("Output filename", str, default="test.cat")
+    numRows = Field(
+        dtype=int,
+        default=49,
+        doc="Number of grid rows."
+    )
+    numColumns = Field(
+        dtype=int,
+        default=49,
+        doc="Number of grid columns."
+    )
+    varyTheta = Field(
+        dtype=bool,
+        default=True,
+        doc="Vary theta parameter during model fit."
+    )
+    fitMethod = Field(
+        dtype=str,
+        default='least_squares',
+        doc="Minimization method for model fit."
+    )
 
-class GridFitTask(pipeBase.Task):
+class GridFitTask(pipeBase.PipelineTask):
 
     ConfigClass = GridFitConfig
     _DefaultName = "GridFitTask" 
     
     @pipeBase.timeMethod
-    def run(self, infile, ccd_type=None, optics_grid_file=None):
+    def run(self, inputCat):
+
+        ## Need to figure out how to add to connections
+        optics_grid_file = None
+        ccd_type = None ## will probably error since needs geom info
 
         ## Keywords for catalog
-        x_kwd = self.config.x_kwd
-        y_kwd = self.config.y_kwd
-        xx_kwd = self.config.xx_kwd
-        yy_kwd = self.config.yy_kwd
+        x_kwd = 'base_SdssCentroid_X'
+        y_kwd = 'base_SdssCentroid_Y'
+        xx_kwd = 'base_SdssShape_XX'
+        yy_kwd = 'base_SdssShape_YY'
 
         ## Get CCD geometry
         if ccd_type == 'ITL':
@@ -64,12 +99,10 @@ class GridFitTask(pipeBase.Task):
                          * (src[1].data['base_SdssShape_YY'] > 4.5) \
                          * (src[1].data['base_SdssShape_YY'] < 7.)
 
-            idx, dist = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
-            check = (dist < 100.) & (dist > 40.)
-            outlier_mask = np.sum(check[:,1:3], axis=1) >= 2
+            indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
+            outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & ((distances[:,2] < 100.) & (distances[:,2] > 40.))
 
             full_mask = quality_mask & outlier_mask
-
             srcY = all_srcY[full_mask]
             srcX = all_srcX[full_mask]
             
@@ -81,29 +114,21 @@ class GridFitTask(pipeBase.Task):
                 normalized_shifts = None
                 
             ## Perform grid fit
-            ncols = self.config.ncols
-            nrows = self.config.nrows
-            grid, result = grid_fit(srcY, srcX, ncols, nrows,
-                              vary_theta=self.config.vary_theta,
+            grid, result = grid_fit(srcY, srcX, self.config.numColumns, self.config.numRows,
+                              vary_theta=self.config.varyTheta,
                               normalized_shifts=normalized_shifts,
-                              method=self.config.fit_method,
+                              method=self.config.fitMethod,
                               ccd_geom=ccd_geom)
 
             ## Match grid to catalog
             gY, gX = grid.get_source_centroids()
-            indices, dist = coordinate_distances(gY, gX, srcY, srcX)
-            nn_indices = indices[:, 0]
-
-            ## Populate grid information
-            grid_index = np.full(all_srcX.shape[0], np.nan)
-            grid_y = np.full(all_srcX.shape[0], np.nan)
-            grid_x = np.full(all_srcX.shape[0], np.nan)
-            grid_y[nn_indices] = gY
-            grid_x[nn_indices] = gX
-            grid_index[nn_indices] = np.arange(49*49)
-
+            closest_indices, closest_distances = coordinate_distances(srcY, srcX, gY, gX)
+            grid_y[full_mask] = gY[closest_indices[:, 0]]
+            grid_x[full_mask] = gX[closest_indices[:, 0]]
+            grid_index[full_mask] = closest_indices[:, 0]
 
             ## Merge tables
+            ## How do I convert this to DM stuff?
             new_cols = fits.ColDefs([fits.Column(name='spotgrid_index', 
                                                  format='D', array=grid_index),
                                      fits.Column(name='spotgrid_x', 
@@ -117,6 +142,6 @@ class GridFitTask(pipeBase.Task):
             ## Append grid HDU
             grid_hdu = grid.make_grid_hdu()
             src.append(grid_hdu)
-            src.writeto(self.config.outfile, overwrite=True)
+#            src.writeto(self.config.outfile, overwrite=True)
 
-        return grid, result, srcY, srcX
+        return pipeBase.Struct(vaSourceCat=src)
