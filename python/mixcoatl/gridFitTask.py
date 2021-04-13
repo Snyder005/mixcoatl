@@ -19,8 +19,12 @@ class GridFitConfig(pexConfig.Config):
                             default='base_SdssCentroid_Y')
     x_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
                             default='base_SdssCentroid_X')
+    xx_kwd = pexConfig.Field('Source catalog xx-shape keyword', str, 
+                             default="base_SdssShape_XX")
+    yy_kwd = pexConfig.Field('Source catalog yy-shape keyword', str,
+                             default="base_SdssShape_YY")
     vary_theta = pexConfig.Field("Vary theta parameter during fit", bool,
-                                 default=False)
+                                 default=True)
     fit_method = pexConfig.Field("Method for fit", str,
                                  default='least_squares')
     outfile = pexConfig.Field("Output filename", str, default="test.cat")
@@ -36,8 +40,8 @@ class GridFitTask(pipeBase.Task):
         ## Keywords for catalog
         x_kwd = self.config.x_kwd
         y_kwd = self.config.y_kwd
-        xx_kwd = 'base_SdssShape_XX'
-        yy_kwd = 'base_SdssShape_YY'
+        xx_kwd = self.config.xx_kwd
+        yy_kwd = self.config.yy_kwd
 
         ## Get CCD geometry
         if ccd_type == 'ITL':
@@ -55,22 +59,16 @@ class GridFitTask(pipeBase.Task):
             allsrc_points = np.asarray([[x,y] for x,y in zip(all_srcX,all_srcY)])
             
             # Mask the bad grid points
-            quality_mask = (src[1].data['base_SdssShape_XX'] > 4.5)*(src[1].data['base_SdssShape_XX'] < 7.) \
-                * (src[1].data['base_SdssShape_YY'] > 4.5)*(src[1].data['base_SdssShape_YY'] < 7.)
+            quality_mask = (src[1].data['base_SdssShape_XX'] > 4.5) \
+                         * (src[1].data['base_SdssShape_XX'] < 7.)  \
+                         * (src[1].data['base_SdssShape_YY'] > 4.5) \
+                         * (src[1].data['base_SdssShape_YY'] < 7.)
 
-            # Mask points without at least two neighbors
-            outlier_mask = []
-            for pt in allsrc_points:
-                distances = np.sort([distance.euclidean(pt,p) for p in allsrc_points])[1:]
-                count = 0
-                for d in distances:
-                    if(d > 40) & (d < 100.) & (count < 2): 
-                        count = count + 1
-                    else:
-                        break
-                outlier_mask.append(count >= 2)
+            idx, dist = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
+            check = (dist < 100.) & (dist > 40.)
+            outlier_mask = np.sum(check[:,1:3], axis=1) >= 2
 
-            full_mask = [m1 & m2 for m1,m2 in zip(quality_mask, outlier_mask)]
+            full_mask = quality_mask & outlier_mask
 
             srcY = all_srcY[full_mask]
             srcX = all_srcX[full_mask]
@@ -93,25 +91,16 @@ class GridFitTask(pipeBase.Task):
 
             ## Match grid to catalog
             gY, gX = grid.get_source_centroids()
+            indices, dist = coordinate_distances(gY, gX, srcY, srcX)
+            nn_indices = indices[:, 0]
 
-            identified_points = [[x,y] for x,y in zip(srcX, srcY)]
-            sourcegrid_points = [[x,y] for x,y in zip(gX, gY)]
-
-            grid_index = np.full(len(allsrc_points), np.nan)
-            grid_y = np.full(len(allsrc_points), np.nan)
-            grid_x = np.full(len(allsrc_points), np.nan)
-            
-            for ipt in identified_points:
-                index = 0
-                for i in range(len(allsrc_points)):
-                    if np.array_equal(allsrc_points[i], ipt):
-                        index = i
-                        break
-
-                closest_index = np.argmin([distance.euclidean(pt, ipt) for pt in sourcegrid_points])
-                grid_y[index] = gY[closest_index]
-                grid_x[index] = gX[closest_index]
-                grid_index[index] = closest_index
+            ## Populate grid information
+            grid_index = np.full(all_srcX.shape[0], np.nan)
+            grid_y = np.full(all_srcX.shape[0], np.nan)
+            grid_x = np.full(all_srcX.shape[0], np.nan)
+            grid_y[nn_indices] = gY
+            grid_x[nn_indices] = gX
+            grid_index[nn_indices] = np.arange(49*49)
 
 
             ## Merge tables

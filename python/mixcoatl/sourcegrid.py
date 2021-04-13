@@ -18,7 +18,7 @@ from itertools import product
 
 class DistortedGrid:
 
-    def __init__(self, ystep, xstep, theta, y0, x0, ncols, nrows, 
+    def __init__(self, ystep, xstep, theta, y0, x0, ncols=49, nrows=49, 
                  normalized_shifts=None):
 
         ## Ideal grid parameters
