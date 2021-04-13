@@ -171,7 +171,7 @@ class SpotCalibrationTask(pipeBase.Task):
         gridhdu = optics_grid.make_grid_hdu()
         tablehdu = fits.BinTableHDU(mean_data_table)
 
-        hdulist = fits.HDUList([prihdu, gridhdu, tablehdu])
+        hdulist = fits.HDUList([prihdu, tablehdu, gridhdu])
         hdulist.writeto(os.path.join(self.config.output_dir, self.config.outfile), overwrite=True)
 
         return
