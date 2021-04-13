@@ -119,13 +119,15 @@ class SpotCalibrationConfig(pexConfig.Config):
 class SpotCalibrationTask(pipeBase.Task):
     """Task to combine distorted grid fits."""
     
-    ConfigClass = CalibrationConfig
-    _DefaultName = "CalibrationTask"
+    ConfigClass = SpotCalibrationConfig
+    _DefaultName = "SpotCalibrationTask"
     
     @pipeBase.timeMethod
     def run(self, infiles):
 
         ## Initialize data from distorted_grid
+        all_x0 = np.zeros(len(infiles))
+        all_y0 = np.zeros(len(infiles))
         all_xstep = np.zeros(len(infiles))
         all_ystep = np.zeros(len(infiles))
         all_theta = np.zeros(len(infiles))
@@ -134,6 +136,8 @@ class SpotCalibrationTask(pipeBase.Task):
         for i, infile in enumerate(infiles):
             grid = DistortedGrid.from_fits(infile)
 
+            all_x0[i] = grid.x0
+            all_y0[i] = grid.y0
             all_xstep[i] = grid.xstep
             all_ystep[i] = grid.ystep
             all_theta[i] = grid.theta
@@ -143,6 +147,8 @@ class SpotCalibrationTask(pipeBase.Task):
 
 
         ## Compute data means
+        mean_x0 = np.nanmean(all_x0)
+        mean_y0 = np.nanmean(all_y0)
         mean_xstep = np.nanmean(all_xstep)
         mean_ystep = np.nanmean(all_ystep)
         mean_theta = np.nanmean(all_theta)
@@ -151,12 +157,14 @@ class SpotCalibrationTask(pipeBase.Task):
 
 
         ## Create and save optical distortions grid
-        grid = DistortedGrid(mean_ystep, mean_xstep, mean_theta, 0., 0., self.config.ncols, self.config.nrows)
+        grid = DistortedGrid(mean_ystep, mean_xstep, mean_theta, mean_y0, mean_x0, 
+                             self.config.ncols, self.config.nrows)
         grid.make_source_grid()
         gY = grid._y
         gX = grid._x
 
-        optics_grid = DistortedGrid(mean_ystep, mean_xstep, mean_theta, 0., 0., self.config.ncols, self.config.nrows, (gY,gX))
+        optics_grid = DistortedGrid(mean_ystep, mean_xstep, mean_theta, mean_y0, mean_x0, 
+                                    self.config.ncols, self.config.nrows, (gY,gX))
 
         prihdr = fits.Header()
         prihdu = fits.PrimaryHDU(header=prihdr)
