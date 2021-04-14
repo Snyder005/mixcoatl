@@ -22,8 +22,8 @@ class GridFitConnections(pipeBase.PipelineTaskConnections,
                          dimensions=("instrument", "exposure", "detector")):
 
     inputCat = cT.Input(
-        doc="Source catalog produced in calibrate task.",
-        name='src',
+        doc="Source catalog produced by characterize spot task.",
+        name='spotSrc',
         storageClass="SourceCatalog",
         dimensions=("instrument", "exposure", "detector")
     )
@@ -72,12 +72,6 @@ class GridFitTask(pipeBase.PipelineTask):
         optics_grid_file = None
         ccd_type = None ## will probably error since needs geom info
 
-        ## Keywords for catalog
-        x_kwd = 'base_SdssCentroid_X'
-        y_kwd = 'base_SdssCentroid_Y'
-        xx_kwd = 'base_SdssShape_XX'
-        yy_kwd = 'base_SdssShape_YY'
-
         ## Get CCD geometry
         if ccd_type == 'ITL':
             ccd_geom = ITL_AMP_GEOM
@@ -86,62 +80,57 @@ class GridFitTask(pipeBase.PipelineTask):
         else:
             ccd_geom = None
 
-        ## Get source positions for fit
-        with fits.open(infile) as src:
+        src = inputCat.asAstropy()
 
-            all_srcY = src[1].data[y_kwd]
-            all_srcX = src[1].data[x_kwd]
-            allsrc_points = np.asarray([[x,y] for x,y in zip(all_srcX,all_srcY)])
+        all_srcY = src['base_SdssCentroid_Y']
+        all_srcX = src['base_SdssCentroid_X']
+        
+        # Mask the bad grid points
+        quality_mask = (src['base_SdssShape_XX'] > 4.5) \
+                     * (src['base_SdssShape_XX'] < 7.)  \
+                     * (src['base_SdssShape_YY'] > 4.5) \
+                     * (src['base_SdssShape_YY'] < 7.)
+
+        indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
+        outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & ((distances[:,2] < 100.) & (distances[:,2] > 40.))
+
+        full_mask = quality_mask & outlier_mask
+        srcY = all_srcY[full_mask]
+        srcX = all_srcX[full_mask]
+        
+        ## Optionally get existing normalized centroid shifts
+        if optics_grid_file is not None:
+            optics_grid = DistortedGrid.from_fits(optics_grid_file)
+            normalized_shifts = (optics_grid.norm_dy, optics_grid.norm_dx)
+        else:
+            normalized_shifts = None
             
-            # Mask the bad grid points
-            quality_mask = (src[1].data['base_SdssShape_XX'] > 4.5) \
-                         * (src[1].data['base_SdssShape_XX'] < 7.)  \
-                         * (src[1].data['base_SdssShape_YY'] > 4.5) \
-                         * (src[1].data['base_SdssShape_YY'] < 7.)
+        ## Perform grid fit
+        grid, result = grid_fit(srcY, srcX, self.config.numColumns, self.config.numRows,
+                          vary_theta=self.config.varyTheta,
+                          normalized_shifts=normalized_shifts,
+                          method=self.config.fitMethod,
+                          ccd_geom=ccd_geom)
 
-            indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
-            outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & ((distances[:,2] < 100.) & (distances[:,2] > 40.))
+        ## Match grid to catalog
+        gY, gX = grid.get_source_centroids()
+        closest_indices, closest_distances = coordinate_distances(srcY, srcX, gY, gX)
+        grid_y[full_mask] = gY[closest_indices[:, 0]]
+        grid_x[full_mask] = gX[closest_indices[:, 0]]
+        grid_index[full_mask] = closest_indices[:, 0]
 
-            full_mask = quality_mask & outlier_mask
-            srcY = all_srcY[full_mask]
-            srcX = all_srcX[full_mask]
-            
-            ## Optionally get existing normalized centroid shifts
-            if optics_grid_file is not None:
-                optics_grid = DistortedGrid.from_fits(optics_grid_file)
-                normalized_shifts = (optics_grid.norm_dy, optics_grid.norm_dx)
-            else:
-                normalized_shifts = None
-                
-            ## Perform grid fit
-            grid, result = grid_fit(srcY, srcX, self.config.numColumns, self.config.numRows,
-                              vary_theta=self.config.varyTheta,
-                              normalized_shifts=normalized_shifts,
-                              method=self.config.fitMethod,
-                              ccd_geom=ccd_geom)
+        ## Merge tables
+        ## How do I convert this to DM stuff?
+        new_cols = fits.ColDefs([fits.Column(name='spotgrid_index', 
+                                             format='D', array=grid_index),
+                                 fits.Column(name='spotgrid_x', 
+                                             format='D', array=grid_x),
+                                 fits.Column(name='spotgrid_y', 
+                                             format='D', array=grid_y)])
+        cols = src.columns
+        new_hdu = fits.BinTableHDU.from_columns(cols+new_cols)
+        grid_hdu = grid.make_grid_hdu()
+        new_src = fits.HDUList([new_hdu, grid_hdu])
+        new_src.writeto('test.cat', overwrite=True)
 
-            ## Match grid to catalog
-            gY, gX = grid.get_source_centroids()
-            closest_indices, closest_distances = coordinate_distances(srcY, srcX, gY, gX)
-            grid_y[full_mask] = gY[closest_indices[:, 0]]
-            grid_x[full_mask] = gX[closest_indices[:, 0]]
-            grid_index[full_mask] = closest_indices[:, 0]
-
-            ## Merge tables
-            ## How do I convert this to DM stuff?
-            new_cols = fits.ColDefs([fits.Column(name='spotgrid_index', 
-                                                 format='D', array=grid_index),
-                                     fits.Column(name='spotgrid_x', 
-                                                 format='D', array=grid_x),
-                                     fits.Column(name='spotgrid_y', 
-                                                 format='D', array=grid_y)])
-            cols = src[1].columns
-            new_hdu = fits.BinTableHDU.from_columns(cols+new_cols)
-            src[1] = new_hdu
-
-            ## Append grid HDU
-            grid_hdu = grid.make_grid_hdu()
-            src.append(grid_hdu)
-#            src.writeto(self.config.outfile, overwrite=True)
-
-        return pipeBase.Struct(vaSourceCat=src)
+    return pipeBase.Struct(vaSourceCat=src)
