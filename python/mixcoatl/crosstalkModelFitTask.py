@@ -143,6 +143,7 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
     ConfigClass = CrosstalkModelFitConfig
     _DefaultName = 'cpCrosstalkModelFit'
 
+    @pipebase.timeMethod
     def run(self, inputExp):
         
         covariance = [[7.0, 0.0], [0.0, 7.0]] 
