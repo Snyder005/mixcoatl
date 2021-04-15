@@ -80,16 +80,14 @@ class GridFitTask(pipeBase.PipelineTask):
         else:
             ccd_geom = None
 
-        src = inputCat.asAstropy()
-
-        all_srcY = src['base_SdssCentroid_Y']
-        all_srcX = src['base_SdssCentroid_X']
+        all_srcY = inputCat['base_SdssCentroid_Y']
+        all_srcX = inputCat['base_SdssCentroid_X']
         
         # Mask the bad grid points
-        quality_mask = (src['base_SdssShape_XX'] > 4.5) \
-                     * (src['base_SdssShape_XX'] < 7.)  \
-                     * (src['base_SdssShape_YY'] > 4.5) \
-                     * (src['base_SdssShape_YY'] < 7.)
+        quality_mask = (inputCat['base_SdssShape_XX'] > 4.5) \
+                     * (inputCat['base_SdssShape_XX'] < 7.)  \
+                     * (inputCat['base_SdssShape_YY'] > 4.5) \
+                     * (inputCat['base_SdssShape_YY'] < 7.)
 
         indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
         outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & ((distances[:,2] < 100.) & (distances[:,2] > 40.))
@@ -113,24 +111,43 @@ class GridFitTask(pipeBase.PipelineTask):
                           ccd_geom=ccd_geom)
 
         ## Match grid to catalog
+        grid_y = np.full(all_srcY.shape[0], np.nan)
+        grid_y = np.full(all_srcX.shape[0], np.nan)
+        grid_index = np.full(all_srcX.shape[0], np.nan)
+
         gY, gX = grid.get_source_centroids()
         closest_indices, closest_distances = coordinate_distances(srcY, srcX, gY, gX)
         grid_y[full_mask] = gY[closest_indices[:, 0]]
         grid_x[full_mask] = gX[closest_indices[:, 0]]
         grid_index[full_mask] = closest_indices[:, 0]
 
-        ## Merge tables
-        ## How do I convert this to DM stuff?
-        new_cols = fits.ColDefs([fits.Column(name='spotgrid_index', 
-                                             format='D', array=grid_index),
-                                 fits.Column(name='spotgrid_x', 
-                                             format='D', array=grid_x),
-                                 fits.Column(name='spotgrid_y', 
-                                             format='D', array=grid_y)])
-        cols = src.columns
-        new_hdu = fits.BinTableHDU.from_columns(cols+new_cols)
-        grid_hdu = grid.make_grid_hdu()
-        new_src = fits.HDUList([new_hdu, grid_hdu])
-        new_src.writeto('test.cat', overwrite=True)
+        ## Add spot grid information to new source catalog
+        schema = inputCat.getSchema()
+        mapper = afwTable.SchemaMapper(schema)
+        mapper.addMinimalSchema(schema, True)
+        grid_y_col = mapper.editOutputSchema().addField('spotgrid_y', type=float,
+                                                        doc='Y-position for ideal spot grid.')
+        grid_x_col = mapper.editOutputSchema().addField('spotgrid_x', type=float,
+                                                        doc='X-position for ideal spot grid.')
+        grid_index_col = mapper.editOutputSchema().addField('spotgrid_index', type=int,
+                                                            doc='Index of ideal spot grid.')
+    
+        outputCat = afwTable.SourceCatalog(mapper.getOutputSchema())
+        outputCat.extend(inputCat, mapper=mapper)
+        outputCat[grid_y_col][:] = grid_y
+        outputCat[grid_x_col][:] = grid_x
+        outputCat[grid_index_col][:] = grid_index
+        
+        ## Add grid parameters to metadata
+        md = inputCat.getMetadata()
+        md.add('GRID_X0', grid.x0)
+        md.add('GRID_Y0', grid.y0)
+        md.add('GRID_THETA', grid.theta)
+        md.add('GRID_XSTEP', grid.xstep)
+        md.add('GRID_YSTEP', grid.ystep)
+        md.add('GRID_NCOLS', grid.ncols)
+        md.add('GRID_NROWS', grid.nrows)
 
-    return pipeBase.Struct(vaSourceCat=src)
+        outputCat.setMetadata(md)
+
+    return pipeBase.Struct(vaSourceCat=outputCat)
