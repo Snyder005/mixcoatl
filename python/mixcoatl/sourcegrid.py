@@ -183,7 +183,7 @@ def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     return indices, distances
 
 def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None, 
-              ccd_geom=None):
+              bbox=None):
     """Calculate sum of positional errors of true source grid and model grid.
     
     For every true source, the distance to the nearest neighbor source 
@@ -215,11 +215,11 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
     gY, gX = grid.get_source_centroids()
 
     ## Filter source grid positions according to CCD geometry
-    if ccd_geom is not None:
+    if bbox is not None:
         ymin = 0
-        ymax = ccd_geom.ny*2
-        xmin = 0 
-        xmax = ccd_geom.nx*8
+        ymax = bbox.getHeight()
+        xmin = 0
+        xmax = bbox.getWidth()
 
         mask = (gY < ymax)*(gY > ymin)*(gX < xmax)*(gX > xmin)
         gY = gY[mask]
@@ -231,7 +231,7 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
     return distances[:, 0]
 
 def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
-             method='least_squares', normalized_shifts=None, ccd_geom=None):
+             method='least_squares', normalized_shifts=None, bbox=None):
 
     ## Calculate mean xstep/ystep
     nsources = srcY.shape[0]
@@ -274,7 +274,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
         ystep = np.nanmedian(dist2_array)
 
     ## Find initial guess for grid center based on orientation
-    grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta, ccd_geom.vendor)
+    grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta, ccd_geom.vendor) ## Need to debug this to work with vendor
     y0_guess, x0_guess = grid_center_guess[1], grid_center_guess[0]    
     
     ## Define fit parameters
@@ -287,7 +287,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
     
     minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
                        fcn_kws={'normalized_shifts' : normalized_shifts,
-                                'ccd_geom' : ccd_geom}, nan_policy='omit')
+                                'bbox' : bbox}, nan_policy='omit')
     result = minner.minimize(params=params, method=method, max_nfev=None)
     x0result = result.params['x0']
     y0result = result.params['y0']
@@ -300,7 +300,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
         params['theta'].set(vary=True)
         theta_minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
                        fcn_kws={'normalized_shifts' : normalized_shifts,
-                                'ccd_geom' : ccd_geom}, nan_policy='omit')
+                                'bbox' : bbox}, nan_policy='omit')
         theta_result = theta_minner.minimize(params=params, method=method, max_nfev=None)
         result.params['theta'] = theta_result.params['theta']
         

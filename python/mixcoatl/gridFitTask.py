@@ -27,7 +27,12 @@ class GridFitConnections(pipeBase.PipelineTaskConnections,
         storageClass="SourceCatalog",
         dimensions=("instrument", "exposure", "detector")
     )
-
+    bbox = cT.Input(
+        doc="Bounding box for CCD.",
+        name="postISRCCD.bbox",
+        storageClass="Box2I",
+        dimensions=("instrument", "exposure", "detector")
+    )
     vaSourceCat = cT.Output(
         doc="Value added source catalog produced by grid fit task.",
         name="vaSrc",
@@ -66,19 +71,10 @@ class GridFitTask(pipeBase.PipelineTask):
     _DefaultName = "GridFitTask" 
     
     @pipeBase.timeMethod
-    def run(self, inputCat):
+    def run(self, inputCat, bbox):
 
         ## Need to figure out how to add to connections
         optics_grid_file = None
-        ccd_type = None ## will probably error since needs geom info
-
-        ## Get CCD geometry
-        if ccd_type == 'ITL':
-            ccd_geom = ITL_AMP_GEOM
-        elif ccd_type == 'E2V':
-            ccd_geom = E2V_AMP_GEOM
-        else:
-            ccd_geom = None
 
         all_srcY = inputCat['base_SdssCentroid_Y']
         all_srcX = inputCat['base_SdssCentroid_X']
@@ -108,7 +104,7 @@ class GridFitTask(pipeBase.PipelineTask):
                           vary_theta=self.config.varyTheta,
                           normalized_shifts=normalized_shifts,
                           method=self.config.fitMethod,
-                          ccd_geom=ccd_geom)
+                          bbox=bbox)
 
         ## Match grid to catalog
         grid_y = np.full(all_srcY.shape[0], np.nan)
