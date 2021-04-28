@@ -144,4 +144,4 @@ class GridFitTask(pipeBase.PipelineTask):
 
         outputCat.setMetadata(md)
 
-    return pipeBase.Struct(gridSourceCat=outputCat)
+        return pipeBase.Struct(gridSourceCat=outputCat)
