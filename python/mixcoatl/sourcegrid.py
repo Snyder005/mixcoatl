@@ -274,7 +274,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
         ystep = np.nanmedian(dist2_array)
 
     ## Find initial guess for grid center based on orientation
-    grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta, ccd_geom.vendor) ## Need to debug this to work with vendor
+    grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta)
     y0_guess, x0_guess = grid_center_guess[1], grid_center_guess[0]    
     
     ## Define fit parameters
@@ -427,28 +427,18 @@ def find_midpoint_guess(Y, X, xstep, ystep, theta, ccd_type):
 
     return guess
 
-def fit_check(srcX, srcY, gX, gY, ccd_type):
-    """Returns the X & Y residuals of the fit, number of identified 
-       stars, and number of missing stars (ideal grid points
-       without corresponding stars)"""
+def fit_check(srcX, srcY, gX, gY):
+    """Returns the X & Y residuals of the fit, number of identified stars, 
+       number of missing stars (ideal grid points without corresponding stars),
+       and the X/Y coordinates of outliers (<5th and >95th percentile)."""
 
     residualsX = []
     residualsY = []
     identified_points = [[x,y] for x,y in zip(srcX, srcY)]
+    sourcegrid_points = [[x,y] for x,y in zip(gX, gY)]
     
     # Total number of identified stars
     nsources = len(identified_points)
-    
-    # Mask the points to the CCD bounds (not exact for now)
-    if ccd_type == 'ITL':
-        mask = (gX < 2000.)*(gY < 4000.)*(gX > -2000.)*(gY > 0)
-    else:
-        mask = (gX < 4000.)*(gY < 4000.)*(gX > 0.)*(gY > 0)
-
-    gX = gX[mask]
-    gY = gY[mask]
-    
-    sourcegrid_points = [[x,y] for x,y in zip(gX, gY)]
     
     # Calculate residuals
     countx = 0
@@ -458,19 +448,18 @@ def fit_check(srcX, srcY, gX, gY, ccd_type):
         residualsX.append(closest[0]-ipt[0])
         residualsY.append(closest[1]-ipt[1])
 
-
     # Calculate the outlier points
     outliersX = np.array(identified_points)
     outliersY = np.array(identified_points)
     rX = np.array(residualsX)
     rY = np.array(residualsY)
-    outliersX = outliersX[(rX < np.quantile(rX, 0.1)) | (rX > np.quantile(rX, 0.9))].tolist()
-    outliersY = outliersY[(rY < np.quantile(rY, 0.1)) | (rY > np.quantile(rY, 0.9))].tolist()
+    outliersX = outliersX[(rX < np.quantile(rX, 0.05)) | (rX > np.quantile(rX, 0.95))].tolist()
+    outliersY = outliersY[(rY < np.quantile(rY, 0.05)) | (rY > np.quantile(rY, 0.95))].tolist()
     
-    # Calculate number of identified stars have a corresponding grid point within 20px
+    # Calculate number of identified stars have a corresponding ideal grid point within 40px
     count = 0
     for sgpt in sourcegrid_points:
         closest = sorted(identified_points, key=lambda pt : distance.euclidean(pt, sgpt))[0]
-        if distance.euclidean(closest, sgpt) < 20: count = count + 1
+        if distance.euclidean(closest, sgpt) < 40: count += 1
 
-    return residualsX, residualsY, nsources, len(sourcegrid_points) - count, outliersX, outliersY
+    return residualsX, residualsY, nsources, count, outliersX, outliersY
