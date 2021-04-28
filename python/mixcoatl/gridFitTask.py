@@ -1,15 +1,12 @@
 """
 To Do:
-    1. Get CCD geometry information using DM tools and replace existing AMP_GEOM
-    2. Add optics_distortion_grid information to Connections (as another source catalog, maybe?)
-    3. Update modification of the source catalog to use DM tools.
+    1. Add optics_distortion_grid information to Connections (as another source catalog, maybe?)
+    2. Determine how grid information is stored in DM butler world.
 """
-import os
 import numpy as np
-from os.path import join
-from astropy.io import fits
 from scipy.spatial import distance
 
+import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
@@ -39,7 +36,7 @@ class GridFitConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector")
     )
 
-class GridFitConfig(pipebase.PipelineTaskConfig,
+class GridFitConfig(pipeBase.PipelineTaskConfig,
                     pipelineConnections=GridFitConnections):
     """Configuration for GridFitTask."""
 
@@ -75,14 +72,14 @@ class GridFitTask(pipeBase.PipelineTask):
         ## Need to figure out how to add to connections
         optics_grid_file = None
 
-        all_srcY = inputCat['base_SdssCentroid_Y']
-        all_srcX = inputCat['base_SdssCentroid_X']
+        all_srcY = inputCat['base_SdssCentroid_y']
+        all_srcX = inputCat['base_SdssCentroid_x']
         
         # Mask the bad grid points
-        quality_mask = (inputCat['base_SdssShape_XX'] > 4.5) \
-                     * (inputCat['base_SdssShape_XX'] < 7.)  \
-                     * (inputCat['base_SdssShape_YY'] > 4.5) \
-                     * (inputCat['base_SdssShape_YY'] < 7.)
+        quality_mask = (inputCat['base_SdssShape_xx'] > 4.5) \
+                     * (inputCat['base_SdssShape_xx'] < 7.)  \
+                     * (inputCat['base_SdssShape_yy'] > 4.5) \
+                     * (inputCat['base_SdssShape_yy'] < 7.)
 
         indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
         outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & \
@@ -106,7 +103,7 @@ class GridFitTask(pipeBase.PipelineTask):
 
         ## Match grid to catalog
         grid_y = np.full(all_srcY.shape[0], np.nan)
-        grid_y = np.full(all_srcX.shape[0], np.nan)
+        grid_x = np.full(all_srcX.shape[0], np.nan)
         grid_index = np.full(all_srcX.shape[0], np.nan)
 
         gY, gX = grid.get_source_centroids()
@@ -123,7 +120,7 @@ class GridFitTask(pipeBase.PipelineTask):
                                                         doc='Y-position for ideal spot grid.')
         grid_x_col = mapper.editOutputSchema().addField('spotgrid_x', type=float,
                                                         doc='X-position for ideal spot grid.')
-        grid_index_col = mapper.editOutputSchema().addField('spotgrid_index', type=int,
+        grid_index_col = mapper.editOutputSchema().addField('spotgrid_index', type=np.int32,
                                                             doc='Index of ideal spot grid.')
     
         outputCat = afwTable.SourceCatalog(mapper.getOutputSchema())
