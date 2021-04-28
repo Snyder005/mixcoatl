@@ -1,9 +1,7 @@
 """Source grid fitting classes and functions.
 
 To Do:
-   * Implement new MatchedCatalog functionality
-   * Maybe add getter/setter functionality for grid parameters
-     that automatically updates centroids if changed.
+   * Rework DistortedGrid object in context of DM as a calibration object.
 """
 from __future__ import print_function
 from __future__ import absolute_import
@@ -304,7 +302,6 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
         theta_result = theta_minner.minimize(params=params, method=method, max_nfev=None)
         result.params['theta'] = theta_result.params['theta']
         
-    
     parvals = result.params.valuesdict()
     grid = DistortedGrid(parvals['ystep'], parvals['xstep'], 
                          parvals['theta'], parvals['y0'], 

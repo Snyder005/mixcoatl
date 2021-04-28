@@ -16,7 +16,6 @@ import lsst.pipe.base.connectionTypes as cT
 from lsst.pex.config import Field
 
 from .sourcegrid import DistortedGrid, grid_fit, coordinate_distances
-from .utils import ITL_AMP_GEOM, E2V_AMP_GEOM
 
 class GridFitConnections(pipeBase.PipelineTaskConnections, 
                          dimensions=("instrument", "exposure", "detector")):
@@ -33,9 +32,9 @@ class GridFitConnections(pipeBase.PipelineTaskConnections,
         storageClass="Box2I",
         dimensions=("instrument", "exposure", "detector")
     )
-    vaSourceCat = cT.Output(
-        doc="Value added source catalog produced by grid fit task.",
-        name="vaSrc",
+    gridSourceCat = cT.Output(
+        doc="Source catalog produced by grid fit task.",
+        name="gridSpotSrc",
         storageClass="SourceCatalog",
         dimensions=("instrument", "exposure", "detector")
     )
@@ -86,7 +85,8 @@ class GridFitTask(pipeBase.PipelineTask):
                      * (inputCat['base_SdssShape_YY'] < 7.)
 
         indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
-        outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & ((distances[:,2] < 100.) & (distances[:,2] > 40.))
+        outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & \
+            ((distances[:,2] < 100.) & (distances[:,2] > 40.))
 
         full_mask = quality_mask & outlier_mask
         srcY = all_srcY[full_mask]
@@ -101,10 +101,8 @@ class GridFitTask(pipeBase.PipelineTask):
             
         ## Perform grid fit
         grid, result = grid_fit(srcY, srcX, self.config.numColumns, self.config.numRows,
-                          vary_theta=self.config.varyTheta,
-                          normalized_shifts=normalized_shifts,
-                          method=self.config.fitMethod,
-                          bbox=bbox)
+                                vary_theta=self.config.varyTheta, normalized_shifts=normalized_shifts,
+                                method=self.config.fitMethod, bbox=bbox)
 
         ## Match grid to catalog
         grid_y = np.full(all_srcY.shape[0], np.nan)
@@ -146,4 +144,4 @@ class GridFitTask(pipeBase.PipelineTask):
 
         outputCat.setMetadata(md)
 
-    return pipeBase.Struct(vaSourceCat=outputCat)
+    return pipeBase.Struct(gridSourceCat=outputCat)
