@@ -317,23 +317,23 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
 def minimum_bounding_rectangle(points):
     """
     Find the smallest bounding rectangle for a set of points.
-    Returns a set of points representing the corners of the bounding box.
+    Returns the corners of the bounding box with the smallest area.
 
     r is a rotation matrix for the rectangle
-    rval is an nx2 matrix of coordinates
+    rval is a 4x2 matrix of coordinates for the corners of the box.
     
     Used to calculate initial guess for grid center.
     """
 
     # Get the convex hull for the points
-    hull_points = points[ConvexHull(points).vertices]
+    simplicies = points[ConvexHull(points).vertices]
 
     # Calculate edge angles
-    edges = np.zeros((len(hull_points)-1, 2))
-    edges = hull_points[1:] - hull_points[:-1]
+    edge = np.zeros((len(simplicies)-1, 2))
+    edge = simplicies[1:] - simplicies[:-1]
 
-    angles = np.zeros((len(edges)))
-    angles = np.arctan2(edges[:, 1], edges[:, 0])
+    angles = np.zeros((len(edge)))
+    angles = np.arctan2(edge[:, 1], edge[:, 0])
 
     angles = np.abs(np.mod(angles, np.pi/2.))
     angles = np.unique(angles)
@@ -348,7 +348,7 @@ def minimum_bounding_rectangle(points):
     rotations = rotations.reshape((-1, 2, 2))
 
     # Apply rotations to the hull
-    rot_points = np.dot(rotations, hull_points.T)
+    rot_points = np.dot(rotations, simplicies.T)
 
     # Find the bounding points
     min_x = np.nanmin(rot_points[:, 0], axis=1)
@@ -358,14 +358,14 @@ def minimum_bounding_rectangle(points):
 
     # Find the box with the best area
     areas = (max_x - min_x) * (max_y - min_y)
-    best_idx = np.argmin(areas)
+    idxs = np.argmin(areas)
 
     # Return the best box
-    x1 = max_x[best_idx]
-    x2 = min_x[best_idx]
-    y1 = max_y[best_idx]
-    y2 = min_y[best_idx]
-    r = rotations[best_idx]
+    x1 = max_x[idxs]
+    x2 = min_x[idxs]
+    y1 = max_y[idxs]
+    y2 = min_y[idxs]
+    r = rotations[idxs]
 
     rval = np.zeros((4, 2))
     rval[0] = np.dot([x1, y2], r)
@@ -376,7 +376,7 @@ def minimum_bounding_rectangle(points):
     return rval, r
 
 
-def find_midpoint_guess(Y, X, xstep, ystep, theta, ccd_type):
+def find_midpoint_guess(Y, X, xstep, ystep, theta):
     """Calculate an initial midpoint guess. Works for side, corner, 
        and full grid exposure"""
     
@@ -402,23 +402,17 @@ def find_midpoint_guess(Y, X, xstep, ystep, theta, ccd_type):
     d_x = (49 - 1)*xstep
     d_y = (49 - 1)*ystep
 
-    # Offset for corresponding CCD coordinates
-    if ccd_type == 'ITL':
-        geom_offset = -2000.
-    else:
-        geom_offset = 0.
-
     # Calculate guess
-    if points_centroid[0] >= (2000 + geom_offset) and points_centroid[1] >= 2000: # Top Right
+    if points_centroid[0] >= 2000 and points_centroid[1] >= 2000: # Top Right
         corner = np.dot([min(rect[:,0]), min(rect[:,1])], r) + rval_centroid
         guess = corner + np.dot([d_x/2., d_y/2.], r)
-    elif points_centroid[0] <= (2000 + geom_offset) and points_centroid[1] >= 2000: # Top Left
+    elif points_centroid[0] <= 2000 and points_centroid[1] >= 2000: # Top Left
         corner = np.dot([max(rect[:,0]), min(rect[:,1])], r) + rval_centroid
         guess = corner + np.dot([-d_x/2., d_y/2.], r)
-    elif points_centroid[0] >= (2000 + geom_offset) and points_centroid[1] <= 2000: # Bottom Right
+    elif points_centroid[0] >= 2000 and points_centroid[1] <= 2000: # Bottom Right
         corner = np.dot([min(rect[:,0]), max(rect[:,1])], r) + rval_centroid
         guess = corner + np.dot([d_x/2., -d_y/2.], r)
-    elif points_centroid[0] <= (2000 + geom_offset) and points_centroid[1] <= 2000: # Bottom Left
+    elif points_centroid[0] <= 2000 and points_centroid[1] <= 2000: # Bottom Left
         corner = np.dot([max(rect[:,0]), max(rect[:,1])], r) + rval_centroid
         guess = corner + np.dot([-d_x/2., -d_y/2.], r)
     else:
