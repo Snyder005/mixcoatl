@@ -274,7 +274,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
         ystep = np.nanmedian(dist2_array)
 
     ## Find initial guess for grid center based on orientation
-    grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta, ccd_geom.vendor)
+    grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta)
     y0_guess, x0_guess = grid_center_guess[1], grid_center_guess[0]    
     
     ## Define fit parameters
@@ -317,23 +317,23 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
 def minimum_bounding_rectangle(points):
     """
     Find the smallest bounding rectangle for a set of points.
-    Returns a set of points representing the corners of the bounding box.
+    Returns the corners of the bounding box with the smallest area.
 
     r is a rotation matrix for the rectangle
-    rval is an nx2 matrix of coordinates
+    rval is a 4x2 matrix of coordinates for the corners of the box.
     
     Used to calculate initial guess for grid center.
     """
 
     # Get the convex hull for the points
-    hull_points = points[ConvexHull(points).vertices]
+    simplicies = points[ConvexHull(points).vertices]
 
     # Calculate edge angles
-    edges = np.zeros((len(hull_points)-1, 2))
-    edges = hull_points[1:] - hull_points[:-1]
+    edge = np.zeros((len(simplicies)-1, 2))
+    edge = simplicies[1:] - simplicies[:-1]
 
-    angles = np.zeros((len(edges)))
-    angles = np.arctan2(edges[:, 1], edges[:, 0])
+    angles = np.zeros((len(edge)))
+    angles = np.arctan2(edge[:, 1], edge[:, 0])
 
     angles = np.abs(np.mod(angles, np.pi/2.))
     angles = np.unique(angles)
@@ -348,7 +348,7 @@ def minimum_bounding_rectangle(points):
     rotations = rotations.reshape((-1, 2, 2))
 
     # Apply rotations to the hull
-    rot_points = np.dot(rotations, hull_points.T)
+    rot_points = np.dot(rotations, simplicies.T)
 
     # Find the bounding points
     min_x = np.nanmin(rot_points[:, 0], axis=1)
@@ -358,14 +358,14 @@ def minimum_bounding_rectangle(points):
 
     # Find the box with the best area
     areas = (max_x - min_x) * (max_y - min_y)
-    best_idx = np.argmin(areas)
+    idxs = np.argmin(areas)
 
     # Return the best box
-    x1 = max_x[best_idx]
-    x2 = min_x[best_idx]
-    y1 = max_y[best_idx]
-    y2 = min_y[best_idx]
-    r = rotations[best_idx]
+    x1 = max_x[idxs]
+    x2 = min_x[idxs]
+    y1 = max_y[idxs]
+    y2 = min_y[idxs]
+    r = rotations[idxs]
 
     rval = np.zeros((4, 2))
     rval[0] = np.dot([x1, y2], r)
@@ -376,7 +376,7 @@ def minimum_bounding_rectangle(points):
     return rval, r
 
 
-def find_midpoint_guess(Y, X, xstep, ystep, theta, ccd_type):
+def find_midpoint_guess(Y, X, xstep, ystep, theta):
     """Calculate an initial midpoint guess. Works for side, corner, 
        and full grid exposure"""
     
@@ -402,23 +402,17 @@ def find_midpoint_guess(Y, X, xstep, ystep, theta, ccd_type):
     d_x = (49 - 1)*xstep
     d_y = (49 - 1)*ystep
 
-    # Offset for corresponding CCD coordinates
-    if ccd_type == 'ITL':
-        geom_offset = -2000.
-    else:
-        geom_offset = 0.
-
     # Calculate guess
-    if points_centroid[0] >= (2000 + geom_offset) and points_centroid[1] >= 2000: # Top Right
+    if points_centroid[0] >= 2000 and points_centroid[1] >= 2000: # Top Right
         corner = np.dot([min(rect[:,0]), min(rect[:,1])], r) + rval_centroid
         guess = corner + np.dot([d_x/2., d_y/2.], r)
-    elif points_centroid[0] <= (2000 + geom_offset) and points_centroid[1] >= 2000: # Top Left
+    elif points_centroid[0] <= 2000 and points_centroid[1] >= 2000: # Top Left
         corner = np.dot([max(rect[:,0]), min(rect[:,1])], r) + rval_centroid
         guess = corner + np.dot([-d_x/2., d_y/2.], r)
-    elif points_centroid[0] >= (2000 + geom_offset) and points_centroid[1] <= 2000: # Bottom Right
+    elif points_centroid[0] >= 2000 and points_centroid[1] <= 2000: # Bottom Right
         corner = np.dot([min(rect[:,0]), max(rect[:,1])], r) + rval_centroid
         guess = corner + np.dot([d_x/2., -d_y/2.], r)
-    elif points_centroid[0] <= (2000 + geom_offset) and points_centroid[1] <= 2000: # Bottom Left
+    elif points_centroid[0] <= 2000 and points_centroid[1] <= 2000: # Bottom Left
         corner = np.dot([max(rect[:,0]), max(rect[:,1])], r) + rval_centroid
         guess = corner + np.dot([-d_x/2., -d_y/2.], r)
     else:
@@ -427,28 +421,18 @@ def find_midpoint_guess(Y, X, xstep, ystep, theta, ccd_type):
 
     return guess
 
-def fit_check(srcX, srcY, gX, gY, ccd_type):
-    """Returns the X & Y residuals of the fit, number of identified 
-       stars, and number of missing stars (ideal grid points
-       without corresponding stars)"""
+def fit_check(srcX, srcY, gX, gY):
+    """Returns the X & Y residuals of the fit, number of identified stars, 
+       number of missing stars (ideal grid points without corresponding stars),
+       and the X/Y coordinates of outliers (<5th and >95th percentile)."""
 
     residualsX = []
     residualsY = []
     identified_points = [[x,y] for x,y in zip(srcX, srcY)]
+    sourcegrid_points = [[x,y] for x,y in zip(gX, gY)]
     
     # Total number of identified stars
     nsources = len(identified_points)
-    
-    # Mask the points to the CCD bounds (not exact for now)
-    if ccd_type == 'ITL':
-        mask = (gX < 2000.)*(gY < 4000.)*(gX > -2000.)*(gY > 0)
-    else:
-        mask = (gX < 4000.)*(gY < 4000.)*(gX > 0.)*(gY > 0)
-
-    gX = gX[mask]
-    gY = gY[mask]
-    
-    sourcegrid_points = [[x,y] for x,y in zip(gX, gY)]
     
     # Calculate residuals
     countx = 0
@@ -458,19 +442,18 @@ def fit_check(srcX, srcY, gX, gY, ccd_type):
         residualsX.append(closest[0]-ipt[0])
         residualsY.append(closest[1]-ipt[1])
 
-
     # Calculate the outlier points
     outliersX = np.array(identified_points)
     outliersY = np.array(identified_points)
     rX = np.array(residualsX)
     rY = np.array(residualsY)
-    outliersX = outliersX[(rX < np.quantile(rX, 0.1)) | (rX > np.quantile(rX, 0.9))].tolist()
-    outliersY = outliersY[(rY < np.quantile(rY, 0.1)) | (rY > np.quantile(rY, 0.9))].tolist()
+    outliersX = outliersX[(rX < np.quantile(rX, 0.05)) | (rX > np.quantile(rX, 0.95))].tolist()
+    outliersY = outliersY[(rY < np.quantile(rY, 0.05)) | (rY > np.quantile(rY, 0.95))].tolist()
     
-    # Calculate number of identified stars have a corresponding grid point within 20px
+    # Calculate number of identified stars have a corresponding ideal grid point within 40px
     count = 0
     for sgpt in sourcegrid_points:
         closest = sorted(identified_points, key=lambda pt : distance.euclidean(pt, sgpt))[0]
-        if distance.euclidean(closest, sgpt) < 20: count = count + 1
+        if distance.euclidean(closest, sgpt) < 40: count += 1
 
-    return residualsX, residualsY, nsources, len(sourcegrid_points) - count, outliersX, outliersY
+    return residualsX, residualsY, nsources, count, outliersX, outliersY
