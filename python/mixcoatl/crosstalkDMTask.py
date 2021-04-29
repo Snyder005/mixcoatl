@@ -157,8 +157,6 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
 
     @pipebase.timeMethod
     def run(self, inputExp):
-        
-        covariance = [[7.0, 0.0], [0.0, 7.0]] 
 
         ## run() method
         outputRatios = defaultdict(lambda: defaultdict(dict))
@@ -204,6 +202,8 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
                     continue
                 self.log.debug("    Target amplifier: %s", targetAmpName)
 
+                covariance = self.calculate_covariance(sourceExp, sourceAmp, targetAmp)
+
                 targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
                                                            targetAmp, sourceAmp,
                                                            isTrimmed=self.config.isTrimmed)
@@ -222,279 +222,16 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
             outputFluxes=ddict2dict(outputFluxes)
         )
 
-class CrosstalkExtractConnections(pipeBase.PipelineTaskConnections,
-                                  dimensions=("instrument", "exposure", "detector")):
-    inputExp = cT.Input(
-        name="crosstalkInputs",
-        doc="Input post-ISR processed exposure to measure crosstalk from.",
-        storageClass="Exposure",
-        dimensions=("instrument", "exposure", "detector"),
-        multiple=False,
-    )
-    # To Do: Depends on DM-21904.
-    sourceExp = cT.Input(
-        name="crosstalkSource",
-        doc="Post-ISR exposure to measure for inter-chip crosstalk onto inputExp.",
-        storageClass="Exposure",
-        dimensions=("instrument", "exposure", "detector"),
-        multiple=True,
-        deferLoad=True,
-        # lookupFunction=None,
-    )
-    outputRatios = cT.Output(
-        name="crosstalkRatios",
-        doc="Extracted crosstalk pixel ratios.",
-        storageClass="StructuredDataDict",
-        dimensions=("instrument", "exposure", "detector"),
-    )
-    outputFluxes = cT.Output(
-        name="crosstalkFluxes",
-        doc="Source pixel fluxes used in ratios.",
-        storageClass="StructuredDataDict",
-        dimensions=("instrument", "exposure", "detector"),
-    )
-    background = cT.Output(
-        doc="Output background model.",
-        name="icCrosstalkBackground",
-        storageClass="Background",
-        dimensions=["instrument", "exposure", "detector"],
-    )
+    def calculate_covariance(self, exposure, amp1, amp2):
 
-    def __init__(self, *, config=None):
-        super().__init__(config=config)
-        # Discard sourceExp until DM-21904 allows full interchip
-        # measurements.
-        self.inputs.discard("sourceExp")
-        
-class CrosstalkExtractConfig(pipeBase.PipelineTaskConfig,
-                             pipelineConnections=CrosstalkExtractConnections):
-    """Configuration for the measurement of pixel ratios.
-    """
-    doMeasureInterchip = Field(
-        dtype=bool,
-        default=False,
-        doc="Measure inter-chip crosstalk as well?",
-    )
-    threshold = Field(
-        dtype=float,
-        default=30000,
-        doc="Minimum level of source pixels for which to measure crosstalk."
-    )
-    background = ConfigurableField(
-        target=SubtractBackgroundTask,
-        doc="Configuration for initial background estimation",
-    )
-    ignoreSaturatedPixels = Field(
-        dtype=bool,
-        default=True,
-        doc="Should saturated pixels be ignored?"
-    )
-    badMask = ListField(
-        dtype=str,
-        default=["BAD", "INTRP"],
-        doc="Mask planes to ignore when identifying source pixels."
-    )
-    isTrimmed = Field(
-        dtype=bool,
-        default=True,
-        doc="Is the input exposure trimmed?"
-    )
+        ccd = exposure.getDetector()
 
-    def validate(self):
-        super().validate()
+        oscanImage1 = exposure.maskedImage[amp1.getRawHorizontalOverscanBBox()]
+        oscanImage2 = exposure.maskedImage[amp2.getRawHorizontalOverscanBBox()]
 
-        # Ensure the handling of the SAT mask plane is consistent
-        # with the ignoreSaturatedPixels value.
-        if self.ignoreSaturatedPixels:
-            if 'SAT' not in self.badMask:
-                self.badMask.append('SAT')
-        else:
-            if 'SAT' in self.badMask:
-                self.badMask = [mask for mask in self.badMask if mask != 'SAT']
+        arr1 = oscanImage1.getImage().getArray().flatten()
+        arr2 = oscanImage2.getImage().getArray().flatten()
 
-class CrosstalkExtractTask(pipeBase.PipelineTask,
-                            pipeBase.CmdLineTask):
-    """Task to measure pixel ratios to find crosstalk.
-    """
-    ConfigClass = CrosstalkExtractConfig
-    _DefaultName = 'cpCrosstalkExtract'
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.makeSubtask("background")
+        cov = np.cov(np.vstack([arr1, arr2]))
 
-    def run(self, inputExp, sourceExps=[]):
-        """Measure pixel ratios between amplifiers in inputExp.
-        Extract crosstalk ratios between different amplifiers.
-        For pixels above ``config.threshold``, we calculate the ratio
-        between each background-subtracted target amp and the source
-        amp. We return a list of ratios for each pixel for each
-        target/source combination, as nested dictionary containing the
-        ratio.
-        Parameters
-        ----------
-        inputExp : `lsst.afw.image.Exposure`
-            Input exposure to measure pixel ratios on.
-        sourceExp : `list` [`lsst.afw.image.Exposure`], optional
-            List of chips to use as sources to measure inter-chip
-            crosstalk.
-        Returns
-        -------
-        results : `lsst.pipe.base.Struct`
-            The results struct containing:
-            ``outputRatios`` : `dict` [`dict` [`dict` [`dict` [`list`]]]]
-                 A catalog of ratio lists.  The dictionaries are
-                 indexed such that:
-                 outputRatios[targetChip][sourceChip][targetAmp][sourceAmp]
-                 contains the ratio list for that combination.
-            ``outputFluxes`` : `dict` [`dict` [`list`]]
-                 A catalog of flux lists.  The dictionaries are
-                 indexed such that:
-                 outputFluxes[sourceChip][sourceAmp]
-                 contains the flux list used in the outputRatios.
-        Notes
-        -----
-        The lsstDebug.Info() method can be rewritten for __name__ =
-        `lsst.cp.pipe.measureCrosstalk`, and supports the parameters:
-        debug.display['extract'] : `bool`
-            Display the exposure under consideration, with the pixels used
-            for crosstalk measurement indicated by the DETECTED mask plane.
-        debug.display['pixels'] : `bool`
-            Display a plot of the ratio calculated for each pixel used in this
-            exposure, split by amplifier pairs.  The median value is listed
-            for reference.
-        """
-        outputRatios = defaultdict(lambda: defaultdict(dict))
-        outputFluxes = defaultdict(lambda: defaultdict(dict))
-
-        threshold = self.config.threshold
-        badPixels = list(self.config.badMask)
-
-        targetDetector = inputExp.getDetector()
-        targetChip = targetDetector.getName()
-
-        # Always look at the target chip first, then go to any other supplied exposures.
-        sourceExtractExps = [copy.deepcopy(inputExp)]
-        sourceExtractExps.extend(sourceExps)
-
-        self.log.info("Measuring full detector background for target: %s", targetChip)
-        targetIm = inputExp.getMaskedImage()
-        FootprintSet(targetIm, Threshold(threshold), "DETECTED")
-        detected = targetIm.getMask().getPlaneBitMask("DETECTED")
-        background = self.background.run(inputExp).background
-        self.debugView('extract', inputExp)
-
-        for sourceExp in sourceExtractExps:
-            sourceDetector = sourceExp.getDetector()
-            sourceChip = sourceDetector.getName()
-            sourceIm = sourceExp.getMaskedImage()
-            bad = sourceIm.getMask().getPlaneBitMask(badPixels)
-            self.log.info("Measuring crosstalk from source: %s", sourceChip)
-
-            if sourceExp != inputExp:
-                FootprintSet(sourceIm, Threshold(threshold), "DETECTED")
-                detected = sourceIm.getMask().getPlaneBitMask("DETECTED")
-
-            # The dictionary of amp-to-amp ratios for this pair of source->target detectors.
-            ratioDict = defaultdict(lambda: defaultdict(list))
-            extractedCount = 0
-
-            for sourceAmp in sourceDetector:
-                sourceAmpName = sourceAmp.getName()
-                sourceAmpBBox = sourceAmp.getBBox() if self.config.isTrimmed else sourceAmp.getRawDataBBox()
-                sourceAmpImage = sourceIm[sourceAmpBBox]
-                sourceMask = sourceAmpImage.mask.array
-                select = ((sourceMask & detected > 0)
-                          & (sourceMask & bad == 0)
-                          & np.isfinite(sourceAmpImage.image.array))
-                count = np.sum(select)
-                self.log.debug("  Source amplifier: %s", sourceAmpName)
-
-                outputFluxes[sourceChip][sourceAmpName] = sourceAmpImage.image.array[select].tolist()
-
-                for targetAmp in targetDetector:
-                    # iterate over targetExposure
-                    targetAmpName = targetAmp.getName()
-                    if sourceAmpName == targetAmpName and sourceChip == targetChip:
-                        ratioDict[sourceAmpName][targetAmpName] = []
-                        continue
-                    self.log.debug("    Target amplifier: %s", targetAmpName)
-
-                    targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
-                                                               targetAmp, sourceAmp,
-                                                               isTrimmed=self.config.isTrimmed)
-                    ratios = (targetAmpImage.array[select])/sourceAmpImage.image.array[select]
-                    ratioDict[targetAmpName][sourceAmpName] = ratios.tolist()
-                    extractedCount += count
-
-                    self.debugPixels('pixels',
-                                     sourceAmpImage.image.array[select],
-                                     targetAmpImage.array[select],
-                                     sourceAmpName, targetAmpName)
-
-            self.log.info("Extracted %d pixels from %s -> %s",
-                          extractedCount, sourceChip, targetChip)
-            outputRatios[targetChip][sourceChip] = ratioDict
-
-        return pipeBase.Struct(
-            outputRatios=ddict2dict(outputRatios),
-            outputFluxes=ddict2dict(outputFluxes),
-            background=background
-        )
-
-    def debugView(self, stepname, exposure):
-        """Utility function to examine the image being processed.
-        Parameters
-        ----------
-        stepname : `str`
-            State of processing to view.
-        exposure : `lsst.afw.image.Exposure`
-            Exposure to view.
-        """
-        frame = getDebugFrame(self._display, stepname)
-        if frame:
-            display = getDisplay(frame)
-            display.scale('asinh', 'zscale')
-            display.mtv(exposure)
-
-            prompt = "Press Enter to continue: "
-            while True:
-                ans = input(prompt).lower()
-                if ans in ("", "c",):
-                    break
-
-    def debugPixels(self, stepname, pixelsIn, pixelsOut, sourceName, targetName):
-        """Utility function to examine the CT ratio pixel values.
-        Parameters
-        ----------
-        stepname : `str`
-            State of processing to view.
-        pixelsIn : `np.ndarray`
-            Pixel values from the potential crosstalk source.
-        pixelsOut : `np.ndarray`
-            Pixel values from the potential crosstalk target.
-        sourceName : `str`
-            Source amplifier name
-        targetName : `str`
-            Target amplifier name
-        """
-        frame = getDebugFrame(self._display, stepname)
-        if frame:
-            import matplotlib.pyplot as plt
-            figure = plt.figure(1)
-            figure.clear()
-
-            axes = figure.add_axes((0.1, 0.1, 0.8, 0.8))
-            axes.plot(pixelsIn, pixelsOut / pixelsIn, 'k+')
-            plt.xlabel("Source amplifier pixel value")
-            plt.ylabel("Measured pixel ratio")
-            plt.title(f"(Source {sourceName} -> Target {targetName}) median ratio: "
-                      f"{(np.median(pixelsOut / pixelsIn))}")
-            figure.show()
-
-            prompt = "Press Enter to continue: "
-            while True:
-                ans = input(prompt).lower()
-                if ans in ("", "c",):
-                    break
-            plt.close()
+        return cov
