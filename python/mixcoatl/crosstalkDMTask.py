@@ -2,6 +2,7 @@
 
 To Do: 
     1. Determine method to restrict satellite crosstalk measurement to single side of sensor.
+    2. Clean up pipetask connection for rawExp.
 """
 import numpy as np
 import copy
@@ -78,6 +79,13 @@ class CrosstalkColumnConnections(pipeBase.PipelineTaskConnections,
     inputExp = cT.Input(
         name="crosstalkInputs",
         doc="Input post-ISR processed exposure to measure crosstalk from.",
+        storageClass="Exposure",
+        dimensions=("instrument", "exposure", "detector"),
+        multiple=False,
+    )
+    rawExp = cT.Input(
+        name="rawInputs",
+        doc="Input raw exposure to measure noise covariance from.",
         storageClass="Exposure",
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
@@ -281,6 +289,13 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
     inputExp = cT.Input(
         name="crosstalkInputs",
         doc="Input post-ISR processed exposure to measure crosstalk from.",
+        storageClass="Exposure",
+        dimensions=("instrument", "exposure", "detector"),
+        multiple=False,
+    )
+    rawExp = cT.Input(
+        name="rawInputs",
+        doc="Input raw exposure to measure noise covariance from.",
         storageClass="Exposure",
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
