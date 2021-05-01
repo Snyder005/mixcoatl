@@ -1,14 +1,13 @@
 """DM Crosstalk Tasks.
 
 To Do: 
-    1. Determine method to get covariance measurement into CrosstalkModelFitTask.
-    2. Maybe implement satellite finding into CrosstalkModelFitTask?
-    3. Maybe add output files for background model parameters (yslope, xslope, zoffset)?
-    2. Improvements to background in the crosstalkExtractTask.
+    1. Determine method to restrict satellite crosstalk measurement to single side of sensor.
 """
 import numpy as np
 import copy
 from collections import defaultdict
+from skimage import feature
+from skimage.transform import hough_line, hough_line_peaks
 
 from lsstDebug import getDebugFrame
 from lsst.afw.detection import FootprintSet, Threshold
@@ -16,13 +15,12 @@ from lsst.afw.display import getDisplay
 from lsst.cp.pipe.utils import ddict2dict
 import lsst.afw.image as afwImage
 from lsst.ip.isr import CrosstalkCalib
-from lsst.meas.algorithms.subtractBackground import SubtractBackgroundConfig, SubtractBackgroundTask
 
 import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
 from lsst.pex.config import Field, ListField, ConfigurableField
 
-from mixcoatl.crosstalk import crosstalk_fit, rectangular_mask
+from mixcoatl.crosstalk import crosstalk_fit, satellite_mask, rectangular_mask
 
 def find_bright_columns(imarr, threshold):
     
@@ -75,8 +73,8 @@ def bad_column(column_indices, threshold):
         return True
     return False
 
-class CrosstalkModelFitConnections(pipeBase.PipelineTaskConnections,
-                                  dimensions=("instrument", "exposure", "detector")):
+class CrosstalkColumnConnections(pipeBase.PipelineTaskConnections,
+                                 dimensions=("instrument", "exposure", "detector")):
     inputExp = cT.Input(
         name="crosstalkInputs",
         doc="Input post-ISR processed exposure to measure crosstalk from.",
@@ -84,7 +82,6 @@ class CrosstalkModelFitConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
-
     outputRatios = cT.Output(
         name="crosstalkRatios",
         doc="Extracted crosstalk pixel ratios.",
@@ -97,14 +94,37 @@ class CrosstalkModelFitConnections(pipeBase.PipelineTaskConnections,
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
+    outputZOffsets = cT.Output(
+        name="crosstalkBackgroundZOffsets",
+        doc="Z offset parameters used in background model.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
+    outputYTilts = cT.Output(
+        name="crosstalkBackgroundYTilts",
+        doc="Y tilt parameters used in background model.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
+    outputXTilts = cT.Output(
+        name="crosstalkBackgroundXTilts",
+        doc="X tilt parameters used in background model.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
 
-class CrosstalkModelFitConfig(pipeBase.PipelineTaskConfig,
-                              pipelineConnections=CrosstalkModelFitConnections):
+class CrosstalkColumnConfig(pipeBase.PipelineTaskConfig,
+                            pipelineConnections=CrosstalkColumnConnections):
     """Configuration for the measurement of pixel ratios.
     """
+    correctNoiseCovariance = Field(
+        dtype=bool,
+        default=False,
+        doc="Correct the effect of correlated read noise."
+    )
     threshold = Field(
         dtype=float,
         default=30000,
@@ -148,19 +168,22 @@ class CrosstalkModelFitConfig(pipeBase.PipelineTaskConfig,
             if 'SAT' in self.badMask:
                 self.badMask = [mask for mask in self.badMask if mask != 'SAT']
 
-class CrosstalkModelFitTask(pipeBase.PipelineTask,
-                            pipeBase.CmdLineTask):
+class CrosstalkColumnTask(pipeBase.PipelineTask,
+                          pipeBase.CmdLineTask):
     """Task to measure pixel ratios to find crosstalk.
     """
-    ConfigClass = CrosstalkModelFitConfig
-    _DefaultName = 'cpCrosstalkModelFit'
+    ConfigClass = CrosstalkColumnConfig
+    _DefaultName = 'cpCrosstalkColumn'
 
-    @pipebase.timeMethod
-    def run(self, inputExp):
+    @pipeBase.timeMethod
+    def run(self, inputExp, rawExp):
 
         ## run() method
         outputRatios = defaultdict(lambda: defaultdict(dict))
         outputFluxes = defaultdict(lambda: defaultdict(dict))
+        outputZOffsets = defaultdict(lambda: defaultdict(dict))
+        outputYTilts = defaultdict(lambda: defaultdict(dict))
+        outputXTilts = defaultdict(lambda: defaultdict(dict))
 
         badPixels = list(self.config.badMask)
 
@@ -177,6 +200,10 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
         self.log.info("Measuring crosstalk from source: %s", sourceChip)
 
         ratioDict = defaultdict(lambda: defaultdict(list))
+        zoffsetDict = defaultdict(lambda: defaultdict(list))
+        ytiltDict = defaultdict(lambda: defaultdict(list))
+        xtiltDict = defaultdict(lambda: defaultdict(list))
+
         extractedCount = 0
 
         for sourceAmp in sourceDetector:
@@ -202,24 +229,254 @@ class CrosstalkModelFitTask(pipeBase.PipelineTask,
                     continue
                 self.log.debug("    Target amplifier: %s", targetAmpName)
 
-                covariance = self.calculate_covariance(sourceExp, sourceAmp, targetAmp)
+                if self.config.correctNoiseCovariance:
+                    covariance = self.calculate_covariance(rawExp, sourceAmp, targetAmp)
+                else:
+                    covariance = np.asarray([[7.0, 0.0], [0.0, 7.0]])
 
                 targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
                                                            targetAmp, sourceAmp,
                                                            isTrimmed=self.config.isTrimmed)
                 targetAmpArray = targetAmpImage.array
-                results = crosstalk_fit(sourceAmpArray, targetAmpArray, select, covariance=covariance)
+                results = crosstalk_fit(sourceAmpArray, targetAmpArray, select, covariance=covariance, 
+                                        correct_covariance=self.config.correctNoiseCovariance, seed=189)
 
                 ratioDict[targetAmpName][sourceAmpName] = [float(results[0])]
+                zoffsetDict[targetAmpName][sourceAmpName] = [float(results[1])]
+                ytiltDict[targetAmpName][sourceAmpName] = [float(results[2])]
+                xtiltDict[targetAmpName][sourceAmpName] = [float(results[3])]
                 extractedCount += 1
 
         self.log.info("Extracted %d pixels from %s -> %s",
                       extractedCount, sourceChip, targetChip)
         outputRatios[targetChip][sourceChip] = ratioDict
+        outputZOffsets[targetChip][sourceChip] = zoffsetDict
+        outputYTilts[targetChip][sourceChip] = ytiltDict
+        outputXTilts[targetChip][sourceChip] = xtiltDict
         
         return pipeBase.Struct(
             outputRatios=ddict2dict(outputRatios),
-            outputFluxes=ddict2dict(outputFluxes)
+            outputFluxes=ddict2dict(outputFluxes),
+            outputZOffsets=ddict2dict(outputZOffsets),
+            outputYTilts=ddict2dict(outputYTilts),
+            outputXTilts=ddict2dict(outputXTilts)
+        )
+
+    def calculate_covariance(self, exposure, amp1, amp2):
+
+        ccd = exposure.getDetector()
+
+        oscanImage1 = exposure.maskedImage[amp1.getRawHorizontalOverscanBBox()]
+        oscanImage2 = exposure.maskedImage[amp2.getRawHorizontalOverscanBBox()]
+
+        arr1 = oscanImage1.getImage().getArray().flatten()
+        arr2 = oscanImage2.getImage().getArray().flatten()
+
+        cov = np.cov(np.vstack([arr1, arr2]))
+
+        return cov
+
+class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
+                                    dimensions=("instrument", "exposure", "detector")):
+    inputExp = cT.Input(
+        name="crosstalkInputs",
+        doc="Input post-ISR processed exposure to measure crosstalk from.",
+        storageClass="Exposure",
+        dimensions=("instrument", "exposure", "detector"),
+        multiple=False,
+    )
+    outputRatios = cT.Output(
+        name="crosstalkRatios",
+        doc="Extracted crosstalk pixel ratios.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
+    outputFluxes = cT.Output(
+        name="crosstalkFluxes",
+        doc="Source pixel fluxes used in ratios.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
+    outputZOffsets = cT.Output(
+        name="crosstalkBackgroundZOffsets",
+        doc="Z offset parameters used in background model.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
+    outputYTilts = cT.Output(
+        name="crosstalkBackgroundYTilts",
+        doc="Y tilt parameters used in background model.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
+    outputXTilts = cT.Output(
+        name="crosstalkBackgroundXTilts",
+        doc="X tilt parameters used in background model.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
+
+    def __init__(self, *, config=None):
+        super().__init__(config=config)
+
+class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
+                               pipelineConnections=CrosstalkSatelliteConnections):
+    """Configuration for the measurement of pixel ratios.
+    """
+    correctNoiseCovariance = Field(
+        dtype=bool,
+        default=False,
+        doc="Correct the effect of correlated read noise."
+    )
+    thresholdLow = Field(
+        dtype=float,
+        default=1,
+        doc="Low threshold for Canny edge detection."
+    )
+    thresholdHigh = Field(
+        dtype=float,
+        default=15,
+        doc="High threshold for Canny edge detection."
+    )
+    maskWidth = Field(
+        dtype=int,
+        default=50,
+        doc="One-sided width of satellite streak mask."
+    )
+    cannySigma = Field(
+        dtype=float,
+        doc="Gaussian smoothing sigma for Canny edge detection.", 
+        default=15.
+    )
+    ignoreSaturatedPixels = Field(
+        dtype=bool,
+        default=True,
+        doc="Should saturated pixels be ignored?"
+    )
+    badMask = ListField(
+        dtype=str,
+        default=["BAD", "INTRP"],
+        doc="Mask planes to ignore when identifying source pixels."
+    )
+    isTrimmed = Field(
+        dtype=bool,
+        default=True,
+        doc="Is the input exposure trimmed?"
+    )
+
+    def validate(self):
+        super().validate()
+
+        # Ensure the handling of the SAT mask plane is consistent
+        # with the ignoreSaturatedPixels value.
+        if self.ignoreSaturatedPixels:
+            if 'SAT' not in self.badMask:
+                self.badMask.append('SAT')
+        else:
+            if 'SAT' in self.badMask:
+                self.badMask = [mask for mask in self.badMask if mask != 'SAT']
+
+class CrosstalkSatelliteTask(pipeBase.PipelineTask,
+                             pipeBase.CmdLineTask):
+    """Task to measure pixel ratios to find crosstalk.
+    """
+    ConfigClass = CrosstalkSatelliteConfig
+    _DefaultName = 'cpSatelliteColumn'
+
+    @pipeBase.timeMethod
+    def run(self, inputExp, rawExp):
+
+        ## run() method
+        outputRatios = defaultdict(lambda: defaultdict(dict))
+        outputFluxes = defaultdict(lambda: defaultdict(dict))
+        outputZOffsets = defaultdict(lambda: defaultdict(dict))
+        outputYTilts = defaultdict(lambda: defaultdict(dict))
+        outputXTilts = defaultdict(lambda: defaultdict(dict))
+
+        badPixels = list(self.config.badMask)
+
+        targetDetector = inputExp.getDetector()
+        targetChip = targetDetector.getName()
+        targetIm = inputExp.getMaskedImage()
+
+        ## loop on sourceExp would go here
+        sourceExp = inputExp ## Ignore other exposures for now
+        sourceDetector = sourceExp.getDetector()
+        sourceChip = sourceDetector.getName()
+        sourceIm = sourceExp.getMaskedImage()
+        bad = sourceIm.getMask().getPlaneBitMask(badPixels)
+        self.log.info("Measuring crosstalk from source: %s", sourceChip)
+
+        ratioDict = defaultdict(lambda: defaultdict(list))
+        zoffsetDict = defaultdict(lambda: defaultdict(list))
+        ytiltDict = defaultdict(lambda: defaultdict(list))
+        xtiltDict = defaultdict(lambda: defaultdict(list))
+
+        extractedCount = 0
+
+        for sourceAmp in sourceDetector:
+            sourceAmpName = sourceAmp.getName()
+            sourceAmpImage = sourceIm[sourceAmp.getBBox()]
+            sourceMask = sourceAmpImage.mask.array
+            sourceAmpArray = sourceAmpImage.image.array
+
+            tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 1000)
+            edges = feature.canny(sourceAmpArray, sigma=self.config.cannySigma, 
+                                  low_threshold=self.config.thresholdLow, 
+                                  high_threshold=self.config.thresholdHigh)
+            h, theta, d = hough_line(edges, theta=tested_angles)
+            _, angle, dist = hough_line_peaks(h, theta, d)
+
+            if len(angle) != 2:
+                continue
+
+            mean_angle = np.mean(angle)
+            mean_dist = np.mean(dist)
+            select = satellite_mask(sourceAmpArray, mean_angle, mean_dist, width=self.config.maskWidth)
+            signal = np.max(aggressor_imarr[select])
+            self.log.debug("  Source amplifier: %s", sourceAmpName)
+
+            outputFluxes[sourceChip][sourceAmpName] = [float(signal)]
+
+            for targetAmp in targetDetector:
+                # iterate over targetExposure
+                targetAmpName = targetAmp.getName()
+                if sourceAmpName == targetAmpName and sourceChip == targetChip:
+                    ratioDict[sourceAmpName][targetAmpName] = []
+                    continue
+                self.log.debug("    Target amplifier: %s", targetAmpName)
+
+                if self.config.correctNoiseCovariance:
+                    covariance = self.calculate_covariance(rawExp, sourceAmp, targetAmp)
+                else:
+                    covariance = np.asarray([[7.0, 0.0], [0.0, 7.0]])
+
+                targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
+                                                           targetAmp, sourceAmp,
+                                                           isTrimmed=self.config.isTrimmed)
+                targetAmpArray = targetAmpImage.array
+                results = crosstalk_fit(sourceAmpArray, targetAmpArray, select, covariance=covariance, 
+                                        correct_covariance=self.config.correctNoiseCovariance, seed=189)
+
+                ratioDict[targetAmpName][sourceAmpName] = [float(results[0])]
+                zoffsetDict[targetAmpName][sourceAmpName] = [float(results[1])]
+                ytiltDict[targetAmpName][sourceAmpName] = [float(results[2])]
+                xtiltDict[targetAmpName][sourceAmpName] = [float(results[3])]
+                extractedCount += 1
+
+        self.log.info("Extracted %d pixels from %s -> %s",
+                      extractedCount, sourceChip, targetChip)
+        outputRatios[targetChip][sourceChip] = ratioDict
+        outputZOffsets[targetChip][sourceChip] = zoffsetDict
+        outputYTilts[targetChip][sourceChip] = ytiltDict
+        outputXTilts[targetChip][sourceChip] = xtiltDict
+        
+        return pipeBase.Struct(
+            outputRatios=ddict2dict(outputRatios),
+            outputFluxes=ddict2dict(outputFluxes),
+            outputZOffsets=ddict2dict(outputZOffsets),
+            outputYTilts=ddict2dict(outputYTilts),
+            outputXTilts=ddict2dict(outputXTilts)
         )
 
     def calculate_covariance(self, exposure, amp1, amp2):
