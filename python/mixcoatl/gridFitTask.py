@@ -76,10 +76,10 @@ class GridFitTask(pipeBase.PipelineTask):
         all_srcX = inputCat['base_SdssCentroid_x']
         
         # Mask the bad grid points
-        quality_mask = (inputCat['base_SdssShape_xx'] > 4.5) \
-                     * (inputCat['base_SdssShape_xx'] < 7.)  \
-                     * (inputCat['base_SdssShape_yy'] > 4.5) \
-                     * (inputCat['base_SdssShape_yy'] < 7.)
+        quality_mask = (inputCat['base_SdssShape_xx'] > 0.1) \
+                     * (inputCat['base_SdssShape_xx'] < 50.)  \
+                     * (inputCat['base_SdssShape_yy'] > 0.1) \
+                     * (inputCat['base_SdssShape_yy'] < 50.)
 
         indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
         outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & \
