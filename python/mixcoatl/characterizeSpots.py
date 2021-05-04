@@ -1,4 +1,5 @@
 import numpy as np
+import traceback
 from scipy.ndimage import maximum_filter
 
 from lsstDebug import getDebugFrame
@@ -10,6 +11,7 @@ import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 import lsst.daf.base as dafBase
 import lsst.pipe.base.connectionTypes as cT
+import lsst.meas.extensions.shapeHSM
 from lsst.afw.table import SourceTable, SourceCatalog
 from lsst.meas.algorithms.installGaussianPsf import InstallGaussianPsfTask
 from lsst.obs.base import ExposureIdInfo
@@ -125,7 +127,12 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
         self.schema.checkUnits(parse_strict=self.config.checkUnitsParseStrict)
         self.outputSchema = afwTable.SourceCatalog(self.schema)
         
-        self.repair.config.doCosmicRay = False
+        try:
+            self.repair.config.doCosmicRay = False
+        except:
+            ### YU is not sure why this happens but to get it going
+            traceback.print_exc()
+            
 
     def getInitOutputDatasets(self):
         outputCatSchema = afwTable.SourceCatalog(self.schema)
