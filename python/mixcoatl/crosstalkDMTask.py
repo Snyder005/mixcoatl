@@ -396,7 +396,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
     """Task to measure pixel ratios to find crosstalk.
     """
     ConfigClass = CrosstalkSatelliteConfig
-    _DefaultName = 'cpSatelliteColumn'
+    _DefaultName = 'cpCrosstalkSatellite'
 
     @pipeBase.timeMethod
     def run(self, inputExp, rawExp):
@@ -448,7 +448,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
             mean_angle = np.mean(angle)
             mean_dist = np.mean(dist)
             select = satellite_mask(sourceAmpArray, mean_angle, mean_dist, width=self.config.maskWidth)
-            signal = np.max(aggressor_imarr[select])
+            signal = np.max(sourceAmpArray[select])
             self.log.debug("  Source amplifier: %s", sourceAmpName)
 
             outputFluxes[sourceChip][sourceAmpName] = [float(signal)]
