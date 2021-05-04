@@ -151,7 +151,7 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
         try:
             self.repair.run(exposure=exposure, keepCRs=True)
         except LengthError:
-            self.log.info("Skipping cosmic ray detection: Too many CR pixels (max %0.f)" % repair.cosmicray.nCrPixelMax)
+            self.log.info("Skipping cosmic ray detection: Too many CR pixels (max %0.f)" % self.repair.cosmicray.nCrPixelMax)
 
         sourceIdFactory = exposureIdInfo.makeSourceIdFactory()
         table = SourceTable.make(self.schema, sourceIdFactory)
