@@ -1,126 +1,144 @@
-import os
+"""
+To Do:
+    1. Add optics_distortion_grid information to Connections (as another source catalog, maybe?)
+    2. Determine how grid information is stored in DM butler world.
+"""
 import numpy as np
-from os.path import join
-from astropy.io import fits
+from scipy.spatial import distance
 
+import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
+import lsst.pipe.base.connectionTypes as cT
+from lsst.pex.config import Field
 
 from .sourcegrid import DistortedGrid, grid_fit, coordinate_distances
-from .utils import ITL_AMP_GEOM, E2V_AMP_GEOM
 
-class GridFitConfig(pexConfig.Config):
+class GridFitConnections(pipeBase.PipelineTaskConnections, 
+                         dimensions=("instrument", "exposure", "detector")):
+
+    inputCat = cT.Input(
+        doc="Source catalog produced by characterize spot task.",
+        name='spotSrc',
+        storageClass="SourceCatalog",
+        dimensions=("instrument", "exposure", "detector")
+    )
+    bbox = cT.Input(
+        doc="Bounding box for CCD.",
+        name="postISRCCD.bbox",
+        storageClass="Box2I",
+        dimensions=("instrument", "exposure", "detector")
+    )
+    gridSourceCat = cT.Output(
+        doc="Source catalog produced by grid fit task.",
+        name="gridSpotSrc",
+        storageClass="SourceCatalog",
+        dimensions=("instrument", "exposure", "detector")
+    )
+
+class GridFitConfig(pipeBase.PipelineTaskConfig,
+                    pipelineConnections=GridFitConnections):
     """Configuration for GridFitTask."""
 
-    nrows = pexConfig.Field("Number of grid rows.", int, default=49)
-    ncols = pexConfig.Field("Number of grid columns.", int, default=49)
-    y_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                            default='base_SdssCentroid_Y')
-    x_kwd = pexConfig.Field("Source catalog y-position keyword", str, 
-                            default='base_SdssCentroid_X')
-    brute_search = pexConfig.Field("Perform prelim brute search", bool,
-                                   default=False)
-    vary_theta = pexConfig.Field("Vary theta parameter during fit", bool,
-                                 default=False)
-    fit_method = pexConfig.Field("Method for fit", str,
-                                 default='least_squares')
-    outfile = pexConfig.Field("Output filename", str, default="test.cat")
+    numRows = Field(
+        dtype=int,
+        default=49,
+        doc="Number of grid rows."
+    )
+    numColumns = Field(
+        dtype=int,
+        default=49,
+        doc="Number of grid columns."
+    )
+    varyTheta = Field(
+        dtype=bool,
+        default=True,
+        doc="Vary theta parameter during model fit."
+    )
+    fitMethod = Field(
+        dtype=str,
+        default='least_squares',
+        doc="Minimization method for model fit."
+    )
 
-class GridFitTask(pipeBase.Task):
+class GridFitTask(pipeBase.PipelineTask):
 
     ConfigClass = GridFitConfig
-    _DefaultName = "GridFitTask"
-
+    _DefaultName = "GridFitTask" 
+    
     @pipeBase.timeMethod
-    def run(self, infile, grid_center_guess, ccd_type=None, 
-            optics_grid_file=None):
+    def run(self, inputCat, bbox):
 
-        y0_guess, x0_guess = grid_center_guess
+        ## Need to figure out how to add to connections
+        optics_grid_file = None
 
-        ## Keywords for catalog
-        x_kwd = self.config.x_kwd
-        y_kwd = self.config.y_kwd
-        xx_kwd = 'base_SdssShape_XX'
-        yy_kwd = 'base_SdssShape_YY'
+        all_srcY = inputCat['base_SdssCentroid_y']
+        all_srcX = inputCat['base_SdssCentroid_x']
+        
+        # Mask the bad grid points
+        quality_mask = (inputCat['base_SdssShape_xx'] > 0.1) \
+                     * (inputCat['base_SdssShape_xx'] < 50.)  \
+                     * (inputCat['base_SdssShape_yy'] > 0.1) \
+                     * (inputCat['base_SdssShape_yy'] < 50.)
 
-        ## Get CCD geometry
-        if ccd_type == 'ITL':
-            ccd_geom = ITL_AMP_GEOM
-        elif ccd_type == 'E2V':
-            ccd_geom = E2V_AMP_GEOM
+        indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
+        outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & \
+            ((distances[:,2] < 100.) & (distances[:,2] > 40.))
+
+        full_mask = quality_mask & outlier_mask
+        srcY = all_srcY[full_mask]
+        srcX = all_srcX[full_mask]
+        
+        ## Optionally get existing normalized centroid shifts
+        if optics_grid_file is not None:
+            optics_grid = DistortedGrid.from_fits(optics_grid_file)
+            normalized_shifts = (optics_grid.norm_dy, optics_grid.norm_dx)
         else:
-            ccd_geom = None
+            normalized_shifts = None
+            
+        ## Perform grid fit
+        grid, result = grid_fit(srcY, srcX, self.config.numColumns, self.config.numRows,
+                                vary_theta=self.config.varyTheta, normalized_shifts=normalized_shifts,
+                                method=self.config.fitMethod, bbox=bbox)
 
-        ## Get source positions for fit
-        with fits.open(infile) as src:
+        ## Match grid to catalog
+        grid_y = np.full(all_srcY.shape[0], np.nan)
+        grid_x = np.full(all_srcX.shape[0], np.nan)
+        grid_index = np.full(all_srcX.shape[0], np.nan)
 
-            all_srcY = src[1].data[y_kwd]
-            all_srcX = src[1].data[x_kwd]
+        gY, gX = grid.get_source_centroids()
+        closest_indices, closest_distances = coordinate_distances(srcY, srcX, gY, gX)
+        grid_y[full_mask] = gY[closest_indices[:, 0]]
+        grid_x[full_mask] = gX[closest_indices[:, 0]]
+        grid_index[full_mask] = closest_indices[:, 0]
 
-            ## Curate data here (remove bad shapes, fluxes, etc.)
-            mask = (src[1].data['base_SdssShape_XX'] > 4.5) \
-                *(src[1].data['base_SdssShape_XX'] < 7.) \
-                *(src[1].data['base_SdssShape_YY'] > 4.5) \
-                *(src[1].data['base_SdssShape_YY'] < 7.) \
-                *(src[1].data['base_SdssCentroid_Y'] < y0_guess+70*25) \
-                *(src[1].data['base_SdssCentroid_Y'] > y0_guess-70*25) \
-                *(src[1].data['base_SdssCentroid_X'] < x0_guess+70*25) \
-                *(src[1].data['base_SdssCentroid_X'] > x0_guess-70*25)
+        ## Add spot grid information to new source catalog
+        schema = inputCat.getSchema()
+        mapper = afwTable.SchemaMapper(schema)
+        mapper.addMinimalSchema(schema, True)
+        grid_y_col = mapper.editOutputSchema().addField('spotgrid_y', type=float,
+                                                        doc='Y-position for ideal spot grid.')
+        grid_x_col = mapper.editOutputSchema().addField('spotgrid_x', type=float,
+                                                        doc='X-position for ideal spot grid.')
+        grid_index_col = mapper.editOutputSchema().addField('spotgrid_index', type=np.int32,
+                                                            doc='Index of ideal spot grid.')
+    
+        outputCat = afwTable.SourceCatalog(mapper.getOutputSchema())
+        outputCat.extend(inputCat, mapper=mapper)
+        outputCat[grid_y_col][:] = grid_y
+        outputCat[grid_x_col][:] = grid_x
+        outputCat[grid_index_col][:] = grid_index
+        
+        ## Add grid parameters to metadata
+        md = inputCat.getMetadata()
+        md.add('GRID_X0', grid.x0)
+        md.add('GRID_Y0', grid.y0)
+        md.add('GRID_THETA', grid.theta)
+        md.add('GRID_XSTEP', grid.xstep)
+        md.add('GRID_YSTEP', grid.ystep)
+        md.add('GRID_NCOLS', grid.ncols)
+        md.add('GRID_NROWS', grid.nrows)
 
-            srcY = all_srcY[mask]
-            srcX = all_srcX[mask]
+        outputCat.setMetadata(md)
 
-            ## Optionally get existing normalized centroid shifts
-            if optics_grid_file is not None:
-                optics_grid = DistortedGrid.from_fits(optics_grid_file)
-                normalized_shifts = (optics_grid.norm_dy, optics_grid.norm_dx)
-            else:
-                normalized_shifts = None
-
-            ## Perform grid fit
-            ncols = self.config.ncols
-            nrows = self.config.nrows
-            result = grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows,
-                              brute_search=self.config.brute_search,
-                              vary_theta=self.config.vary_theta,
-                              normalized_shifts=normalized_shifts,
-                              method=self.config.fit_method,
-                              ccd_geom=ccd_geom)
-
-            ## Make best fit source grid
-            parvals = result.params.valuesdict()
-            grid = DistortedGrid(parvals['ystep'], parvals['xstep'], 
-                                 parvals['theta'], parvals['y0'], 
-                                 parvals['x0'], ncols, nrows, 
-                                 normalized_shifts=normalized_shifts)
-
-            ## Match grid to catalog
-            gY, gX = grid.get_source_centroids()
-            indices, dist = coordinate_distances(gY, gX, all_srcY, all_srcX)
-            nn_indices = indices[:, 0]
-
-            ## Populate grid information
-            grid_index = np.full(all_srcX.shape[0], np.nan)
-            grid_y = np.full(all_srcX.shape[0], np.nan)
-            grid_x = np.full(all_srcX.shape[0], np.nan)
-            grid_y[nn_indices] = gY
-            grid_x[nn_indices] = gX
-            grid_index[nn_indices] = np.arange(49*49)
-
-            ## Merge tables
-            new_cols = fits.ColDefs([fits.Column(name='spotgrid_index', 
-                                                 format='D', array=grid_index),
-                                     fits.Column(name='spotgrid_x', 
-                                                 format='D', array=grid_x),
-                                     fits.Column(name='spotgrid_y', 
-                                                 format='D', array=grid_y)])
-            cols = src[1].columns
-            new_hdu = fits.BinTableHDU.from_columns(cols+new_cols)
-            src[1] = new_hdu
-
-            ## Append grid HDU
-            grid_hdu = grid.make_grid_hdu()
-            src.append(grid_hdu)
-            src.writeto(self.config.outfile, overwrite=True)
-
-        return grid, result
+        return pipeBase.Struct(gridSourceCat=outputCat)

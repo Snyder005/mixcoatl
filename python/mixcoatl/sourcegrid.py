@@ -1,9 +1,7 @@
 """Source grid fitting classes and functions.
 
 To Do:
-   * Implement new MatchedCatalog functionality
-   * Maybe add getter/setter functionality for grid parameters
-     that automatically updates centroids if changed.
+   * Rework DistortedGrid object in context of DM as a calibration object.
 """
 from __future__ import print_function
 from __future__ import absolute_import
@@ -11,14 +9,14 @@ import os
 import scipy
 import numpy as np
 from astropy.io import fits
-from lmfit import Minimizer, Parameters
+from lmfit import Minimizer, Parameters, fit_report
 from scipy import optimize
-from scipy.spatial import distance
+from scipy.spatial import ConvexHull, convex_hull_plot_2d, distance
 from itertools import product
 
 class DistortedGrid:
 
-    def __init__(self, ystep, xstep, theta, y0, x0, ncols, nrows, 
+    def __init__(self, ystep, xstep, theta, y0, x0, ncols=49, nrows=49, 
                  normalized_shifts=None):
 
         ## Ideal grid parameters
@@ -44,7 +42,6 @@ class DistortedGrid:
         """Initialize DistortedGrid instance from a FITS file."""
 
         with fits.open(infile) as hdulist:
-
             x0 = hdulist['GRID_INFO'].header['X0']
             y0 = hdulist['GRID_INFO'].header['Y0']
             theta = hdulist['GRID_INFO'].header['THETA']
@@ -53,8 +50,8 @@ class DistortedGrid:
             ncols = hdulist['GRID_INFO'].header['NCOLS']
             nrows = hdulist['GRID_INFO'].header['NROWS']
 
-            norm_dy = hdulist['GRID_INFO'].data['NORMALIZED_DY']
-            norm_dx = hdulist['GRID_INFO'].data['NORMALIZED_DX']
+            norm_dy = hdulist[-1].data['NORMALIZED_DY']
+            norm_dx = hdulist[-1].data['NORMALIZED_DX']
 
         return cls(ystep, xstep, theta, y0, x0, nrows, ncols, 
                    normalized_shifts=(norm_dy, norm_dx))
@@ -184,7 +181,7 @@ def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     return indices, distances
 
 def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None, 
-              ccd_geom=None):
+              bbox=None):
     """Calculate sum of positional errors of true source grid and model grid.
     
     For every true source, the distance to the nearest neighbor source 
@@ -216,11 +213,11 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
     gY, gX = grid.get_source_centroids()
 
     ## Filter source grid positions according to CCD geometry
-    if ccd_geom is not None:
+    if bbox is not None:
         ymin = 0
-        ymax = ccd_geom.ny*2
-        xmin = 0 
-        xmax = ccd_geom.nx*8
+        ymax = bbox.getHeight()
+        xmin = 0
+        xmax = bbox.getWidth()
 
         mask = (gY < ymax)*(gY > ymin)*(gX < xmax)*(gX > xmin)
         gY = gY[mask]
@@ -231,9 +228,8 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
 
     return distances[:, 0]
 
-def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows, brute_search=False, 
-             vary_theta=False, method='least_squares', normalized_shifts=None, 
-             ccd_geom=None):
+def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
+             method='least_squares', normalized_shifts=None, bbox=None):
 
     ## Calculate mean xstep/ystep
     nsources = srcY.shape[0]
@@ -275,37 +271,186 @@ def grid_fit(srcY, srcX, y0_guess, x0_guess, ncols, nrows, brute_search=False,
         xstep = np.nanmedian(dist1_array)
         ystep = np.nanmedian(dist2_array)
 
+    ## Find initial guess for grid center based on orientation
+    grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta)
+    y0_guess, x0_guess = grid_center_guess[1], grid_center_guess[0]    
+    
     ## Define fit parameters
     params = Parameters()
     params.add('ystep', value=ystep, vary=False)
     params.add('xstep', value=xstep, vary=False)
-    params.add('theta', value=theta, vary=False)
-
-    ## Optionally perform initial brute search
-    params.add('y0', value=y0_guess, min=y0_guess-ystep/3., max=y0_guess+ystep/3., 
-               vary=True, brute_step=ystep/6.)
-    params.add('x0', value=x0_guess, min=x0_guess-xstep/3., max=x0_guess+xstep/3., 
-               vary=True, brute_step=xstep/6.)
-    if brute_search:
-        minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
-                           fcn_kws={'normalized_shifts' : normalized_shifts,
-                                    'ccd_geom' : ccd_geom},
-                           nan_policy='omit')
-        result = minner.minimize(method='brute', params=params)
-        params = result.params
-        parvals = params.valuesdict()
-        params['y0'].set(min=parvals['y0']-ystep/3., max=parvals['y0']+ystep/3.)
-        params['x0'].set(min=parvals['x0']-xstep/3., max=parvals['x0']+xstep/3.)
-
-    ## Optionally enable parameter fit to theta
-    if vary_theta:
-        params['theta'].set(vary=True, min=theta-5*np.pi/180., max=theta+5*np.pi/180.)
-
-    ## LM Fit
+    params.add('y0', value=y0_guess, min=y0_guess-3., max=y0_guess+3., vary=True)
+    params.add('x0', value=x0_guess, min=x0_guess-3., max=x0_guess+3., vary=True)
+    params.add('theta', value=theta, min=theta-0.5*np.pi/180., max=theta+0.5*np.pi/180., vary=False)
+    
     minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
                        fcn_kws={'normalized_shifts' : normalized_shifts,
-                                'ccd_geom' : ccd_geom},
-                       nan_policy='omit')
-    result = minner.minimize(params=params, method=method, max_nfev=400)
+                                'bbox' : bbox}, nan_policy='omit')
+    result = minner.minimize(params=params, method=method, max_nfev=None)
+    x0result = result.params['x0']
+    y0result = result.params['y0']
 
-    return result
+    if vary_theta:
+        result_params = result.params
+        result_values = result_params.valuesdict()
+        params['y0'].set(value=result_values['y0'], vary=False)
+        params['x0'].set(value=result_values['x0'], vary=False)
+        params['theta'].set(vary=True)
+        theta_minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
+                       fcn_kws={'normalized_shifts' : normalized_shifts,
+                                'bbox' : bbox}, nan_policy='omit')
+        theta_result = theta_minner.minimize(params=params, method=method, max_nfev=None)
+        result.params['theta'] = theta_result.params['theta']
+        
+    parvals = result.params.valuesdict()
+    grid = DistortedGrid(parvals['ystep'], parvals['xstep'], 
+                         parvals['theta'], parvals['y0'], 
+                         parvals['x0'], ncols, nrows, 
+                         normalized_shifts=normalized_shifts)
+    
+    return grid, result
+
+
+def minimum_bounding_rectangle(points):
+    """
+    Find the smallest bounding rectangle for a set of points.
+    Returns the corners of the bounding box with the smallest area.
+
+    r is a rotation matrix for the rectangle
+    rval is a 4x2 matrix of coordinates for the corners of the box.
+    
+    Used to calculate initial guess for grid center.
+    """
+
+    # Get the convex hull for the points
+    simplicies = points[ConvexHull(points).vertices]
+
+    # Calculate edge angles
+    edge = np.zeros((len(simplicies)-1, 2))
+    edge = simplicies[1:] - simplicies[:-1]
+
+    angles = np.zeros((len(edge)))
+    angles = np.arctan2(edge[:, 1], edge[:, 0])
+
+    angles = np.abs(np.mod(angles, np.pi/2.))
+    angles = np.unique(angles)
+
+    # Find rotation matrices
+    rotations = np.vstack([
+        np.cos(angles),
+        np.cos(angles-np.pi/2.),
+        np.cos(angles+np.pi/2.),
+        np.cos(angles)]).T
+
+    rotations = rotations.reshape((-1, 2, 2))
+
+    # Apply rotations to the hull
+    rot_points = np.dot(rotations, simplicies.T)
+
+    # Find the bounding points
+    min_x = np.nanmin(rot_points[:, 0], axis=1)
+    max_x = np.nanmax(rot_points[:, 0], axis=1)
+    min_y = np.nanmin(rot_points[:, 1], axis=1)
+    max_y = np.nanmax(rot_points[:, 1], axis=1)
+
+    # Find the box with the best area
+    areas = (max_x - min_x) * (max_y - min_y)
+    idxs = np.argmin(areas)
+
+    # Return the best box
+    x1 = max_x[idxs]
+    x2 = min_x[idxs]
+    y1 = max_y[idxs]
+    y2 = min_y[idxs]
+    r = rotations[idxs]
+
+    rval = np.zeros((4, 2))
+    rval[0] = np.dot([x1, y2], r)
+    rval[1] = np.dot([x2, y2], r)
+    rval[2] = np.dot([x2, y1], r)
+    rval[3] = np.dot([x1, y1], r)
+
+    return rval, r
+
+
+def find_midpoint_guess(Y, X, xstep, ystep, theta):
+    """Calculate an initial midpoint guess. Works for side, corner, 
+       and full grid exposure"""
+    
+    # Get the star positions
+    points = [[x,y] for x,y in zip(X,Y)]
+    points_centroid = np.mean(points, axis=0)
+    
+    # Get the minimum area bounding rectangle corners
+    # and rotation matrix
+    rval, r = minimum_bounding_rectangle(np.array(points))
+    rval_centroid = rval.mean(axis=0)
+
+    # Rotate the bounding rectangle back to calculate which corner to use 
+    # as a fiducial point
+    rect = np.zeros((4, 2))
+    rt=[[row[i] for row in r] for i in range(2)]
+    rect[0] = np.dot(rval[0]-rval_centroid, rt)
+    rect[1] = np.dot(rval[1]-rval_centroid, rt)
+    rect[2] = np.dot(rval[2]-rval_centroid, rt)
+    rect[3] = np.dot(rval[3]-rval_centroid, rt)
+
+    # Calculate median grid spacing
+    d_x = (49 - 1)*xstep
+    d_y = (49 - 1)*ystep
+
+    # Calculate guess
+    if points_centroid[0] >= 2000 and points_centroid[1] >= 2000: # Top Right
+        corner = np.dot([min(rect[:,0]), min(rect[:,1])], r) + rval_centroid
+        guess = corner + np.dot([d_x/2., d_y/2.], r)
+    elif points_centroid[0] <= 2000 and points_centroid[1] >= 2000: # Top Left
+        corner = np.dot([max(rect[:,0]), min(rect[:,1])], r) + rval_centroid
+        guess = corner + np.dot([-d_x/2., d_y/2.], r)
+    elif points_centroid[0] >= 2000 and points_centroid[1] <= 2000: # Bottom Right
+        corner = np.dot([min(rect[:,0]), max(rect[:,1])], r) + rval_centroid
+        guess = corner + np.dot([d_x/2., -d_y/2.], r)
+    elif points_centroid[0] <= 2000 and points_centroid[1] <= 2000: # Bottom Left
+        corner = np.dot([max(rect[:,0]), max(rect[:,1])], r) + rval_centroid
+        guess = corner + np.dot([-d_x/2., -d_y/2.], r)
+    else:
+        print("Unable to locate grid position.")
+        guess = None
+
+    return guess
+
+def fit_check(srcX, srcY, gX, gY):
+    """Returns the X & Y residuals of the fit, number of identified stars, 
+       number of missing stars (ideal grid points without corresponding stars),
+       and the X/Y coordinates of outliers (<5th and >95th percentile)."""
+
+    residualsX = []
+    residualsY = []
+    identified_points = [[x,y] for x,y in zip(srcX, srcY)]
+    sourcegrid_points = [[x,y] for x,y in zip(gX, gY)]
+    
+    # Total number of identified stars
+    nsources = len(identified_points)
+    
+    # Calculate residuals
+    countx = 0
+    county = 0
+    for ipt in identified_points:
+        closest = sorted(sourcegrid_points, key=lambda pt : distance.euclidean(pt, ipt))[0]
+        residualsX.append(closest[0]-ipt[0])
+        residualsY.append(closest[1]-ipt[1])
+
+    # Calculate the outlier points
+    outliersX = np.array(identified_points)
+    outliersY = np.array(identified_points)
+    rX = np.array(residualsX)
+    rY = np.array(residualsY)
+    outliersX = outliersX[(rX < np.quantile(rX, 0.05)) | (rX > np.quantile(rX, 0.95))].tolist()
+    outliersY = outliersY[(rY < np.quantile(rY, 0.05)) | (rY > np.quantile(rY, 0.95))].tolist()
+    
+    # Calculate number of identified stars have a corresponding ideal grid point within 40px
+    count = 0
+    for sgpt in sourcegrid_points:
+        closest = sorted(identified_points, key=lambda pt : distance.euclidean(pt, sgpt))[0]
+        if distance.euclidean(closest, sgpt) < 40: count += 1
+
+    return residualsX, residualsY, nsources, count, outliersX, outliersY
