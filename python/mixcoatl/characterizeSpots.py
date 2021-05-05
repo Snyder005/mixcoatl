@@ -82,6 +82,7 @@ class CharacterizeSpotsConfig(pipeBase.PipelineTaskConfig,
 
     def setDefaults(self):
         super().setDefaults()
+        self.repair.doCosmicRay = False
         # minimal set of measurements needed to determine PSF
         self.measurement.plugins.names = [
             "base_PixelFlags",
@@ -127,13 +128,6 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
         self.schema.checkUnits(parse_strict=self.config.checkUnitsParseStrict)
         self.outputSchema = afwTable.SourceCatalog(self.schema)
         
-        try:
-            self.repair.config.doCosmicRay = False
-        except:
-            ### YU is not sure why this happens but to get it going
-            traceback.print_exc()
-            
-
     def getInitOutputDatasets(self):
         outputCatSchema = afwTable.SourceCatalog(self.schema)
         outputCatSchema.getTable().setMetadata(self.algMetadata)
