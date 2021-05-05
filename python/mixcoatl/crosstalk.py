@@ -4,7 +4,7 @@ This module contains a number of function and class definitions that are used
 for performing the measurement of electronic crosstalk in multi-segmented CCD
 images.
 """
-
+import copy
 import numpy as np
 from astropy.io import fits
 
@@ -33,9 +33,9 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
     """
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
-    mask = (np.abs(Y - y_center) > ly/2.) | (np.abs(X - x_center) > lx/2.)
+    select = (np.abs(Y - y_center) < ly/2.) & (np.abs(X - x_center) < lx/2.)
 
-    return mask
+    return select
 
 def satellite_mask(imarr, angle, distance, width):
     """Make a pixel mask along a target line.
@@ -59,9 +59,9 @@ def satellite_mask(imarr, angle, distance, width):
     """
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
-    mask = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) > width
+    select = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) < width
 
-    return mask
+    return select
 
 def circular_mask(imarr, y_center, x_center, radius):
     """Make a circular pixel mask.
@@ -116,9 +116,9 @@ def crosstalk_model(params, aggressor_imarr):
     
     return model
 
-def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
+def crosstalk_fit(aggressor_array, victim_array, select, covariance,
+                  correct_covariance=False, seed=None):
     """Perform crosstalk victim model least-squares minimization.
-
 
     Parameters
     ----------
@@ -128,8 +128,12 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
         2-D victim postage stamp pixel array.
     mask: `numpy.ndarray`, (Ny, Nx)
         2-D mask boolean array.
-    noise : `float`
-        Image read noise.
+    covariance : `numpy.ndarray`, (2, 2)
+        Covariance between read noise of amplifiers.
+    correct_covariance : 'bool'
+        Correct covariance between read noise of amplifiers.
+    seed : `int`
+        Seed to initialize random generator.
 
     Returns
     -------
@@ -146,20 +150,37 @@ def crosstalk_fit(aggressor_stamp, victim_stamp, mask, noise=7.0):
         - Sum of residuals.
         - Reduced degrees of freedom.
     """    
+    noise = np.sqrt(np.trace(covariance))
+    aggressor_imarr = copy.deepcopy(aggressor_array)
+    victim_imarr = copy.deepcopy(victim_array)
 
-    victim_imarr = np.ma.masked_where(mask, victim_stamp)
+    ## Reduce correlated noise
+    if correct_covariance:
+
+        diag = np.diag(covariance)
+        reverse_covariance = -1*covariance
+        np.fill_diagonal(reverse_covariance, diag)
+
+        rng = np.random.default_rng(seed)
+        correction = rng.multivariate_normal([0.0, 0.0], reverse_covariance, size=aggressor_imarr.shape)
+
+        aggressor_imarr += correction[:, :, 0]
+        victim_imarr += correction[:, :, 1]
+        noise *= np.sqrt(2)
+
+    victim_stamp = victim_imarr[select]
 
     ## Construct masked, compressed basis arrays
-    ay, ax = aggressor_stamp.shape
-    Z = np.ma.masked_where(mask, np.ones((ay, ax))).compressed()
+    ay, ax = aggressor_imarr.shape
+    Z = np.ones((ay, ax))[select]
     Y, X = np.mgrid[:ay, :ax]
-    Y = np.ma.masked_where(mask, Y).compressed()
-    X = np.ma.masked_where(mask, X).compressed()
-    aggressor_imarr = np.ma.masked_where(mask, aggressor_stamp).compressed()
+    Y = Y[select]
+    X = X[select]
+    aggressor_stamp = aggressor_imarr[select]
 
     ## Perform least squares parameter estimation
-    b = victim_imarr.compressed()/noise
-    A = np.vstack([aggressor_imarr, Z, Y, X]).T/noise
+    b = victim_stamp/noise
+    A = np.vstack([aggressor_stamp, Z, Y, X]).T/noise
     params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
     covar = np.linalg.inv(np.dot(A.T, A))
     dof = b.shape[0] - 4
