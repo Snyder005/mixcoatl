@@ -67,10 +67,7 @@ class GridFitTask(pipeBase.PipelineTask):
     _DefaultName = "GridFitTask" 
     
     @pipeBase.timeMethod
-    def run(self, inputCat, bbox):
-
-        ## Need to figure out how to add to connections
-        optics_grid_file = None
+    def run(self, inputCat, bbox, gridCalib=None):
 
         all_srcY = inputCat['base_SdssCentroid_y']
         all_srcX = inputCat['base_SdssCentroid_x']
@@ -90,9 +87,8 @@ class GridFitTask(pipeBase.PipelineTask):
         srcX = all_srcX[full_mask]
         
         ## Optionally get existing normalized centroid shifts
-        if optics_grid_file is not None:
-            optics_grid = DistortedGrid.from_fits(optics_grid_file)
-            normalized_shifts = (optics_grid.norm_dy, optics_grid.norm_dx)
+        if gridCalib is not None:
+            normalized_shifts = (gridCalib.norm_dy, gridCalib.norm_dx)
         else:
             normalized_shifts = None
             

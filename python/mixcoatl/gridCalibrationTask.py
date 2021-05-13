@@ -1,14 +1,11 @@
-import os
 import sys
-import glob
 import numpy as np
-import argparse
 from astropy.io import fits
 from astropy.table import Table, vstack
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
-sys.path.insert(0,'/home/abrought/mixcoatl/python/mixcoatl/')
-sys.path.insert(0,'/home/abrought/mixcoatl/python/')
+import lsst.pipe.base.connectionTypes as cT
+
 from mixcoatl.sourcegrid import DistortedGrid
 
 cols_to_aggregate = ['spotgrid_index',
@@ -105,25 +102,40 @@ cols_to_aggregate = ['spotgrid_index',
                     'base_Variance_value',
                     'base_ClassificationExtendedness_value',
                     'base_FootprintArea_value']
-        
 
-class SpotCalibrationConfig(pexConfig.Config):
+class GridCalibrationConnections(pipeBase.PipelineTaskConnections,
+                                 dimensions=("instrument", "detector")):
+
+    inputCatalogs = cT.Input(
+        doc="Source catalogs for fit spot grid.",
+        name="gridSpotSrc",
+        storageClass="SourceCatalog",
+        dimensions=("instrument", "exposure", "detector"),
+        multiple=True
+    )
+    calibationCatalog = cT.Output(
+        doc="Calibration source catalog for spot grid.",
+        name="gridCalibSrc",
+        storageClass="SourceCatalog",
+        dimensions=("instrument", "detector"),
+        multiple=False,
+        isCalibration=True
+    )
+
+class GridCalibrationConfig(pipeBase.PipelineTaskConfig,
+                            pipelineConnections=GridCalibationConnections):
     """Configuration for Calibration Task"""
     
     ncols = pexConfig.Field("Number of ideal grid columns", int, default=49)
     nrows = pexConfig.Field("Number of ideal grid rows", int, default=49)
-    output_dir = pexConfig.Field("Output directory", str, default="./")
-    outfile = pexConfig.Field("Output filename", str, default="optical_distortion_grid.fits")
 
-
-class SpotCalibrationTask(pipeBase.Task):
+class GridCalibrationTask(pipeBase.PipelineTask):
     """Task to combine distorted grid fits."""
     
-    ConfigClass = SpotCalibrationConfig
-    _DefaultName = "SpotCalibrationTask"
+    ConfigClass = GridCalibrationConfig
+    _DefaultName = "GridCalibrationTask"
     
-    @pipeBase.timeMethod
-    def run(self, infiles):
+    def run(self, inputCatalogs):
 
         ## Initialize data from distorted_grid
         all_x0 = np.zeros(len(infiles))
