@@ -1,0 +1,3 @@
+# This file gives the mapping between DatasetType and the
+# `lsst.daf.butler.Formatter` that handles it.
+DistortedGrid: lsst.obs.base.formatters.fitsGeneric.FitsGenericFormatter

@@ -1,0 +1,3 @@
+storageClasses:
+  DistortedGrid:
+    pytype: mixcoatl.sourcegrid.DistortedGrid
