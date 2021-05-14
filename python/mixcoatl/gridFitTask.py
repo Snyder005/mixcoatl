@@ -68,24 +68,25 @@ class GridFitTask(pipeBase.PipelineTask):
     @pipeBase.timeMethod
     def run(self, inputCat, bbox, gridCalibTable=None):
 
-        all_srcY = inputCat['base_SdssCentroid_y']
-        all_srcX = inputCat['base_SdssCentroid_x']
+        all_srcY = inputCat['slot_Centroid_y']
+        all_srcX = inputCat['slot_Centroid_x']
         
-        # Mask the bad grid points
-        quality_mask = (inputCat['base_SdssShape_xx'] > 0.1) \
-                     * (inputCat['base_SdssShape_xx'] < 50.)  \
-                     * (inputCat['base_SdssShape_yy'] > 0.1) \
-                     * (inputCat['base_SdssShape_yy'] < 50.)
+        ## Mask sources by shape
+        quality_mask = (inputCat['slot_Shape_xx'] > 0.1) \
+                     * (inputCat['slot_Shape_xx'] < 50.)  \
+                     * (inputCat['slot_Shape_yy'] > 0.1) \
+                     * (inputCat['slot_Shape_yy'] < 50.)
 
+        ## Mask sources by distance to neighbors
         indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
         outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & \
             ((distances[:,2] < 100.) & (distances[:,2] > 40.))
 
-        full_mask = quality_mask & outlier_mask
-        srcY = all_srcY[full_mask]
-        srcX = all_srcX[full_mask]
+        mask = quality_mask & outlier_mask
+        srcY = all_srcY[mask]
+        srcX = all_srcX[mask]
         
-        ## Optionally get existing normalized centroid shifts
+        ## Optionally use normalized centroid shifts from calibration
         if gridCalibTable is not None:
             normalized_shifts = (gridCalibTable['spotgrid_normalized_dy'], 
                                  gridCalibTable['spotgrid_normalized_dx'])
@@ -97,41 +98,50 @@ class GridFitTask(pipeBase.PipelineTask):
                                 vary_theta=self.config.varyTheta, normalized_shifts=normalized_shifts,
                                 method=self.config.fitMethod, bbox=bbox)
 
-        ## Match grid to catalog
-        grid_y = np.full(all_srcY.shape[0], np.nan)
-        grid_x = np.full(all_srcX.shape[0], np.nan)
-        grid_norm_dy = np.full(all_srcY.shape[0], np.nan)
-        grid_norm_dx = np.full(all_srcX.shape[0], np.nan)
-        grid_index = np.full(all_srcX.shape[0], np.nan)
-
-        gY, gX = grid.get_source_centroids()
-        closest_indices, closest_distances = coordinate_distances(srcY, srcX, gY, gX)
-        grid_y[full_mask] = gY[closest_indices[:, 0]]
-        grid_x[full_mask] = gX[closest_indices[:, 0]]
-        grid_index[full_mask] = closest_indices[:, 0]
-
-        ## Add spot grid information to new source catalog
+        ## Construct source catalog with new columns
         schema = inputCat.getSchema()
         mapper = afwTable.SchemaMapper(schema)
         mapper.addMinimalSchema(schema, True)
-        grid_y_col = mapper.editOutputSchema().addField('spotgrid_y', type=float,
-                                                        doc='Y-position for ideal spot grid.')
-        grid_x_col = mapper.editOutputSchema().addField('spotgrid_x', type=float,
-                                                        doc='X-position for ideal spot grid.')
-        grid_norm_dy_col = mapper.editOutputSchema().addField('spotgrid_normalized_dy', type=float,
-                                                        doc='Normalized shift from ideal spot grid in Y-position.')
-        grid_norm_dx_col = mapper.editOutputSchema().addField('spotgrid_normalized_dx', type=float,
-                                                        doc='Normalized shift from ideal spot grid in X-position.')
-        grid_index_col = mapper.editOutputSchema().addField('spotgrid_index', type=np.int32,
-                                                            doc='Index of ideal spot grid.')
-    
+        gridYCol = mapper.editOutputSchema().addField('spotgrid_y', type=float,
+                                                      doc='Y-position for spot grid source.')
+        gridXCol = mapper.editOutputSchema().addField('spotgrid_x', type=float,
+                                                      doc='X-position for spot grid source.')
+        normDYCol = mapper.editOutputSchema().addField('spotgrid_normalized_dy', type=float,
+                                                       doc='Normalized shift from spot grid source in Y.')
+        normDXCol = mapper.editOutputSchema().addField('spotgrid_normalized_dx', type=float,
+                                                       doc='Normalized shift from spot grid source in X.')
+        gridIndexCol = mapper.editOutputSchema().addField('spotgrid_index', type=np.int32,
+                                                          doc='Index of corresponding spot grid source.')
+
         outputCat = afwTable.SourceCatalog(mapper.getOutputSchema())
         outputCat.extend(inputCat, mapper=mapper)
-        outputCat[grid_y_col][:] = grid_y
-        outputCat[grid_x_col][:] = grid_x
-        outputCat[grid_norm_dy_col][:] = srcY - grid_y
-        outputCat[grid_norm_dx_col][:] = srcX - grid_x
-        outputCat[grid_index_col][:] = grid_index
+
+        ## Match grid to catalog
+        gridY, gridX = grid.get_source_centroids()
+        match_indices, match_distances = coordinate_distances(srcY, srcX, gridY, gridX)
+
+        ## Construct new column arrays
+        numSrcs = all_srcY.shape[0]
+        all_gridY = np.full(numSrcs, np.nan)
+        all_gridX = np.full(numSrcs, np.nan)
+        all_normDY = np.full(numSrcs, np.nan)
+        all_normDX = np.full(numSrcs, np.nan)
+        all_gridIndex = np.full(numSrcs, np.nan)
+
+        all_gridY[mask] = gridY[match_indices[:, 0]]
+        all_gridX[mask] = gridX[match_indices[:, 0]]
+        all_gridIndex[mask] = match_indices[:, 0]        
+        dy = all_srcY - all_gridY
+        dx = all_srcX - all_gridX
+        all_normDY = (np.sin(-grid.theta)*dx + np.cos(-grid.theta)*dy)/grid.ystep
+        all_normDX = (np.cos(-grid.theta)*dx - np.sin(-grid.theta)*dy)/grid.xstep 
+
+        ## Assign new column arrays to catalog
+        outputCat[gridYCol][:] = all_gridY
+        outputCat[gridXCol][:] = all_gridX
+        outputCat[normDYCol][:] = all_normDY
+        outputCat[normDXCol][:] = all_normDX
+        outputCat[gridIndexCol][:] = all_gridIndex
         
         ## Add grid parameters to metadata
         md = inputCat.getMetadata()
@@ -142,7 +152,6 @@ class GridFitTask(pipeBase.PipelineTask):
         md.add('GRID_YSTEP', grid.ystep)
         md.add('GRID_NCOLS', grid.ncols)
         md.add('GRID_NROWS', grid.nrows)
-
         outputCat.setMetadata(md)
 
         return pipeBase.Struct(gridSourceCat=outputCat)
