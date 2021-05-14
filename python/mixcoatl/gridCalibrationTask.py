@@ -113,10 +113,10 @@ class GridCalibrationConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=True
     )
-    calibationCatalog = cT.Output(
+    outputTable = cT.Output(
         doc="Calibration source catalog for spot grid.",
-        name="gridCalibSrc",
-        storageClass="SourceCatalog",
+        name="gridCalibTable",
+        storageClass="AstropyTable",
         dimensions=("instrument", "detector"),
         multiple=False,
         isCalibration=True
@@ -134,7 +134,7 @@ class GridCalibrationTask(pipeBase.PipelineTask):
     
     ConfigClass = GridCalibrationConfig
     _DefaultName = "GridCalibrationTask"
-    
+
     def run(self, inputCatalogs):
 
         ## Initialize data from distorted_grid

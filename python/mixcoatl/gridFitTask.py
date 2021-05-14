@@ -1,7 +1,6 @@
 """
 To Do:
-    1. Add optics_distortion_grid information to Connections (as another source catalog, maybe?)
-    2. Determine how grid information is stored in DM butler world.
+    1. Add gridCalibTable information to Connections and setup optional Butler inclusion (runQuantum?).
 """
 import numpy as np
 from scipy.spatial import distance
@@ -67,7 +66,7 @@ class GridFitTask(pipeBase.PipelineTask):
     _DefaultName = "GridFitTask" 
     
     @pipeBase.timeMethod
-    def run(self, inputCat, bbox, gridCalib=None):
+    def run(self, inputCat, bbox, gridCalibTable=None):
 
         all_srcY = inputCat['base_SdssCentroid_y']
         all_srcX = inputCat['base_SdssCentroid_x']
@@ -87,8 +86,9 @@ class GridFitTask(pipeBase.PipelineTask):
         srcX = all_srcX[full_mask]
         
         ## Optionally get existing normalized centroid shifts
-        if gridCalib is not None:
-            normalized_shifts = (gridCalib.norm_dy, gridCalib.norm_dx)
+        if gridCalibTable is not None:
+            normalized_shifts = (gridCalibTable['spotgrid_normalized_dy'], 
+                                 gridCalibTable['spotgrid_normalized_dx'])
         else:
             normalized_shifts = None
             
@@ -100,6 +100,8 @@ class GridFitTask(pipeBase.PipelineTask):
         ## Match grid to catalog
         grid_y = np.full(all_srcY.shape[0], np.nan)
         grid_x = np.full(all_srcX.shape[0], np.nan)
+        grid_norm_dy = np.full(all_srcY.shape[0], np.nan)
+        grid_norm_dx = np.full(all_srcX.shape[0], np.nan)
         grid_index = np.full(all_srcX.shape[0], np.nan)
 
         gY, gX = grid.get_source_centroids()
@@ -116,6 +118,10 @@ class GridFitTask(pipeBase.PipelineTask):
                                                         doc='Y-position for ideal spot grid.')
         grid_x_col = mapper.editOutputSchema().addField('spotgrid_x', type=float,
                                                         doc='X-position for ideal spot grid.')
+        grid_norm_dy_col = mapper.editOutputSchema().addField('spotgrid_normalized_dy', type=float,
+                                                        doc='Normalized shift from ideal spot grid in Y-position.')
+        grid_norm_dx_col = mapper.editOutputSchema().addField('spotgrid_normalized_dx', type=float,
+                                                        doc='Normalized shift from ideal spot grid in X-position.')
         grid_index_col = mapper.editOutputSchema().addField('spotgrid_index', type=np.int32,
                                                             doc='Index of ideal spot grid.')
     
@@ -123,6 +129,8 @@ class GridFitTask(pipeBase.PipelineTask):
         outputCat.extend(inputCat, mapper=mapper)
         outputCat[grid_y_col][:] = grid_y
         outputCat[grid_x_col][:] = grid_x
+        outputCat[grid_norm_dy_col][:] = srcY - grid_y
+        outputCat[grid_norm_dx_col][:] = srcX - grid_x
         outputCat[grid_index_col][:] = grid_index
         
         ## Add grid parameters to metadata
