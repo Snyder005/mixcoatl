@@ -13,6 +13,9 @@ from lmfit import Minimizer, Parameters, fit_report
 from scipy import optimize
 from scipy.spatial import ConvexHull, convex_hull_plot_2d, distance
 from itertools import product
+from astropy.table import Table, Column
+
+import lsst.afw.fits as afwFits
 
 class DistortedGrid:
 
@@ -34,28 +37,48 @@ class DistortedGrid:
         if normalized_shifts is None:
             self._norm_dy = np.zeros(nrows*ncols)
             self._norm_dx = np.zeros(nrows*ncols)
-        else:
+        elif (normalized_shifts[0].shape[0], normalized_shifts[1].shape[0]) == (nrows*ncols, nrows*ncols):
             self.add_normalized_shifts(normalized_shifts)
+        else:
+            raise ValueError('Array lengths do not match: ({0},), ({1},)'\
+                .format(normalized.shifts.shape[0], nrows*ncols))
 
     @classmethod
-    def from_fits(cls, infile):
+    def readFits(cls, infile, hdu=afwFits.DEFAULT_HDU):
         """Initialize DistortedGrid instance from a FITS file."""
 
-        with fits.open(infile) as hdulist:
-            x0 = hdulist['GRID_INFO'].header['X0']
-            y0 = hdulist['GRID_INFO'].header['Y0']
-            theta = hdulist['GRID_INFO'].header['THETA']
-            xstep = hdulist['GRID_INFO'].header['XSTEP']
-            ystep = hdulist['GRID_INFO'].header['YSTEP']
-            ncols = hdulist['GRID_INFO'].header['NCOLS']
-            nrows = hdulist['GRID_INFO'].header['NROWS']
+        table = Table.read(infile, hdu=hdu, format='fits')
 
-            norm_dy = hdulist[-1].data['NORMALIZED_DY']
-            norm_dx = hdulist[-1].data['NORMALIZED_DX']
+        return cls.fromAstropy(table)
+
+    @classmethod
+    def fromAstropy(cls, table):
+
+        meta = table.meta
+
+        y0 = meta['GRID_Y0']
+        x0 = meta['GRID_X0']
+        theta = meta['GRID_THETA']
+        ystep = meta['GRID_YSTEP']
+        xstep = meta['GRID_XSTEP']
+        nrows = meta['GRID_NROWS']
+        ncols = meta['GRID_NCOLS']
+
+        normDY = np.zeros(nrows*ncols)
+        normDX = np.zeros(nrows*ncols)
+
+        all_gridIndex = table['spotgrid_index']
+        all_normDY = table['spotgrid_normalized_dy']
+        all_normDX = table['spotgrid_normalized_dx']
+
+        select = all_gridIndex >= 0
+
+        normDY[all_gridIndex[select]] = all_normDY[select]
+        normDX[all_gridIndex[select]] = all_normDX[select]
 
         return cls(ystep, xstep, theta, y0, x0, nrows, ncols, 
-                   normalized_shifts=(norm_dy, norm_dx))
-    
+                   normalized_shifts=(normDY, normDX))
+
     @property
     def norm_dx(self):
         return self._norm_dx
@@ -93,25 +116,24 @@ class DistortedGrid:
             self._norm_dy = norm_dy
             self._norm_dx = norm_dx
 
-    def make_grid_hdu(self):
+    def asAstropy(self):
         """Create an HDU with grid information."""
 
-        hdr = fits.Header()
-        hdr['X0'] = self.x0
-        hdr['Y0'] = self.y0
-        hdr['XSTEP'] = self.xstep
-        hdr['YSTEP'] = self.ystep
-        hdr['THETA'] = self.theta
-        hdr['NCOLS'] = self.ncols
-        hdr['NROWS'] = self.nrows
+        meta = {'GRID_Y0' : self.y0,
+                'GRID_X0' : self.x0,
+                'GRID_YSTEP' : self.ystep,
+                'GRID_XSTEP' : self.xstep,
+                'GRID_THETA' : self.theta,
+                'GRID_NROWS' : self.nrows,
+                'GRID_NCOLS' : self.ncols}
 
-        ## Optic shifts HDU
-        cols = [fits.Column('NORMALIZED_DY', array=self.norm_dy, format='D'),
-                fits.Column('NORMALIZED_DX', array=self.norm_dx, format='D')]
-        tablehdu = fits.BinTableHDU.from_columns(cols, header=hdr,
-                                                 name='GRID_INFO')
+        cols = [Column(range(nrows*ncols), name='spotgrid_index', dtype='>i4'),
+                Column(self._norm_dy, name='spotgrid_normalized_dy', dtype='>f8'),
+                Column(self._norm_dx, name='spotgrid_normalized_dx', dtype='>f8')]
 
-        return tablehdu
+        table = Table(cols, meta=meta)
+
+        return table
 
     def make_source_grid(self):
         """Make rectilinear grid of sources."""
@@ -156,16 +178,11 @@ class DistortedGrid:
         ## Return the flattened arrays
         return yr, xr
 
-    def write_fits(self, outfile, **kwargs):
+    def writeFits(self, outfile, overwrite=False):
         """Write DistortedGrid instance to a FITS file."""
 
-        ## Write grid HDU with minimal PrimaryHDU
-        hdr = fits.Header()
-        prihdu = fits.PrimaryHDU(header=hdr)
-        tablehdu = self.make_grid_hdu()
-        hdulist = fits.HDUList([prihdu, tablehdu])
-
-        hdulist.writeto(outfile, **kwargs)
+        table = self.asAstropy()
+        table.write(outfile, format='fits', overwrite=overwrite)
 
 def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     """Calculate the distances between two sets of points."""

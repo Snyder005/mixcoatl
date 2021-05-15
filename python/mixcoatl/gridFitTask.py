@@ -88,8 +88,8 @@ class GridFitTask(pipeBase.PipelineTask):
         
         ## Optionally use normalized centroid shifts from calibration
         if gridCalibTable is not None:
-            normalized_shifts = (gridCalibTable['spotgrid_normalized_dy'], 
-                                 gridCalibTable['spotgrid_normalized_dx'])
+            gridCalib = DistortedGrid.fromAstropy(gridCalibTable)
+            normalized_shifts = (gridCalib.norm_dy, gridCalib.norm_dx)
         else:
             normalized_shifts = None
             
@@ -117,7 +117,7 @@ class GridFitTask(pipeBase.PipelineTask):
         outputCat.extend(inputCat, mapper=mapper)
 
         ## Match grid to catalog
-        gridY, gridX = grid.get_source_centroids()
+        gridY, gridX = grid.get_source_centroids(distorted=False) # what if distortions provided?
         match_indices, match_distances = coordinate_distances(srcY, srcX, gridY, gridX)
 
         ## Construct new column arrays
