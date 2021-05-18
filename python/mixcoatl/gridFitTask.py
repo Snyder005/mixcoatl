@@ -28,12 +28,25 @@ class GridFitConnections(pipeBase.PipelineTaskConnections,
         storageClass="Box2I",
         dimensions=("instrument", "exposure", "detector")
     )
+    gridCalibTable = cT.PrerequisiteInput(
+        doc="Calibration table for spot grid.",
+        name="gridCalibration",
+        storageClass="AstropyTable",
+        dimensions=("instrument", "detector"),
+        isCalibration=True
+    )
     gridSourceCat = cT.Output(
         doc="Source catalog produced by grid fit task.",
         name="gridSpotSrc",
         storageClass="SourceCatalog",
         dimensions=("instrument", "exposure", "detector")
     )
+
+    def __init__(self, *, config=None):
+        super().__init__(config=config)
+
+        if config.useGridCalibration is not True:
+            self.prerequisiteInputs.discard("gridCalibTable")
 
 class GridFitConfig(pipeBase.PipelineTaskConfig,
                     pipelineConnections=GridFitConnections):
@@ -59,13 +72,17 @@ class GridFitConfig(pipeBase.PipelineTaskConfig,
         default='least_squares',
         doc="Minimization method for model fit."
     )
+    useGridCalibration = Field(
+        dtype=bool,
+        default=False,
+        doc="Use centroid shifts from grid calibration table?"
+    )
 
 class GridFitTask(pipeBase.PipelineTask):
 
     ConfigClass = GridFitConfig
     _DefaultName = "GridFitTask" 
-    
-    @pipeBase.timeMethod
+
     def run(self, inputCat, bbox, gridCalibTable=None):
 
         all_srcY = inputCat['slot_Centroid_y']
@@ -117,7 +134,7 @@ class GridFitTask(pipeBase.PipelineTask):
         outputCat.extend(inputCat, mapper=mapper)
 
         ## Match grid to catalog
-        gridY, gridX = grid.get_source_centroids(distorted=False) # what if distortions provided?
+        gridY, gridX = grid.get_source_centroids()
         match_indices, match_distances = coordinate_distances(srcY, srcX, gridY, gridX)
 
         ## Construct new column arrays

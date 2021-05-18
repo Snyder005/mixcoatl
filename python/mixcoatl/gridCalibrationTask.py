@@ -91,7 +91,7 @@ class GridCalibrationConnections(pipeBase.PipelineTaskConnections,
     )
     outputTable = cT.Output(
         doc="Calibration source catalog for spot grid.",
-        name="gridCalibTable",
+        name="gridCalibration",
         storageClass="AstropyTable",
         dimensions=("instrument", "detector"),
         multiple=False,

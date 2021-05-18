@@ -19,8 +19,7 @@ import lsst.afw.fits as afwFits
 
 class DistortedGrid:
 
-    def __init__(self, ystep, xstep, theta, y0, x0, ncols=49, nrows=49, 
-                 normalized_shifts=None):
+    def __init__(self, ystep, xstep, theta, y0, x0, ncols=49, nrows=49, normalized_shifts=None):
 
         ## Ideal grid parameters
         self.nrows = nrows
@@ -31,17 +30,19 @@ class DistortedGrid:
         self.y0 = y0
         self.x0 = x0
 
-        self.make_source_grid()
+        self._norm_dy = np.zeros(nrows*ncols)
+        self._norm_dx = np.zeros(nrows*ncols)
 
         ## Add centroid shifts
-        if normalized_shifts is None:
-            self._norm_dy = np.zeros(nrows*ncols)
-            self._norm_dx = np.zeros(nrows*ncols)
-        elif (normalized_shifts[0].shape[0], normalized_shifts[1].shape[0]) == (nrows*ncols, nrows*ncols):
-            self.add_normalized_shifts(normalized_shifts)
-        else:
-            raise ValueError('Array lengths do not match: ({0},), ({1},)'\
-                .format(normalized.shifts.shape[0], nrows*ncols))
+        if normalized_shifts is not None:
+            self.replace_normalized_shifts(normalized_shifts)
+
+    @classmethod
+    def readECSV(cls, infile):
+
+        table = Table.read(infile, format='ascii.ecsv')
+
+        return cls.fromAstropy(table)
 
     @classmethod
     def readFits(cls, infile, hdu=afwFits.DEFAULT_HDU):
@@ -87,16 +88,7 @@ class DistortedGrid:
     def norm_dy(self):
         return self._norm_dy
 
-    @property
-    def x(self):
-        return self._x
-
-    @property
-    def y(self):
-        return self._y
-
-    def add_centroid_shifts(self, centroid_shifts):
-        """Calculate and add the normalized source centroid shifts."""
+    def calculate_normalized_shifts(self, centroid_shifts):
 
         dy, dx = centroid_shifts
 
@@ -104,9 +96,15 @@ class DistortedGrid:
         norm_dx = (np.cos(-self.theta)*dx - np.sin(-self.theta)*dy)/self.xstep
         norm_dy = (np.sin(-self.theta)*dx + np.cos(-self.theta)*dy)/self.ystep
 
+        return (norm_dy, norm_dx)
+
+    def replace_centroid_shifts(self, centroid_shifts):
+        """Calculate and add the normalized source centroid shifts."""
+
+        norm_dy, norm_dx = self.calculate_normalized_shifts(centroid_shifts)
         self.add_normalized_shifts((norm_dy, norm_dx))
 
-    def add_normalized_shifts(self, normalized_shifts):
+    def replace_normalized_shifts(self, normalized_shifts):
         """Add the normalized source centroid shifts."""
 
         norm_dy, norm_dx = normalized_shifts
@@ -115,6 +113,9 @@ class DistortedGrid:
         if (norm_dy.shape[0]==nsources)*(norm_dx.shape[0]==nsources):
             self._norm_dy = norm_dy
             self._norm_dx = norm_dx
+        else:
+            raise ValueError('Array lengths do not match: ({0}, {1}), ({2}, {2})'\
+                .format(norm_dy.shape[0], norm_dx.shape[0], nrows*ncols))
 
     def asAstropy(self):
         """Create an HDU with grid information."""
@@ -135,19 +136,6 @@ class DistortedGrid:
 
         return table
 
-    def make_source_grid(self):
-        """Make rectilinear grid of sources."""
-
-        ## Create a standard nrows x ncols grid of points
-        y_array = np.asarray([n*self.ystep - (self.nrows-1)*self.ystep/2. \
-                                  for n in range(self.nrows)])
-        x_array = np.asarray([n*self.xstep - (self.ncols-1)*self.xstep/2. \
-                                  for n in range(self.ncols)])
-        y, x = np.meshgrid(y_array, x_array)
-
-        self._y = y.flatten()
-        self._x = x.flatten()
-
     def get_centroid_shifts(self):
         """Return the centroid shifts given the grid geometry."""
 
@@ -156,27 +144,38 @@ class DistortedGrid:
 
         return dy, dx
 
-    def get_source_centroids(self, distorted=True):
+    def get_source_centroids(self, include_centroid_shifts=False):
         """Return source centroids given the grid geometry."""
 
-        ## Add scaled centroid shifts
-        if distorted:
-            y = self.y + self.norm_dy*self.ystep
-            x = self.x + self.norm_dx*self.xstep
-        else:
-            y = self.y
-            x = self.x
+        ## Make rectilinear grid
+        row_spacings = np.asarray([n*self.ystep - (self.nrows-1)*self.ystep/2. \
+                                  for n in range(self.nrows)])
+        column_spacings = np.asarray([n*self.xstep - (self.ncols-1)*self.xstep/2. \
+                                  for n in range(self.ncols)])
+        rectY, rectX = np.meshgrid(row_spacings, column_spacings)
+
+        rectY = rectY.flatten()
+        rectX = rectX.flatten()
+
+        ## Optionally add scaled centroid shifts
+        if include_centroid_shifts:
+            rectY += self.norm_dy*self.ystep
+            rectX += self.norm_dx*self.xstep
         
-        ## Rotate grid using rotation matrix
-        xr = (np.cos(self.theta)*x - np.sin(self.theta)*y).flatten()
-        yr = (np.sin(self.theta)*x + np.cos(self.theta)*y).flatten()
+        ## Rotate coordinates
+        gridY = np.sin(self.theta)*rectX + np.cos(self.theta)*rectY
+        gridX = np.cos(self.theta)*rectX - np.sin(self.theta)*rectY
         
-        ## Move center of grid to desired x/y center coordinates
-        xr += self.x0
-        yr += self.y0
+        ## Translate coordinates
+        gridY += self.y0
+        gridX += self.x0
         
-        ## Return the flattened arrays
-        return yr, xr
+        return gridY, gridX
+
+    def writeECSV(self, outfile):
+
+        table = self.asAstropy()
+        table.write(outfile, format='ascii.ecsv')
 
     def writeFits(self, outfile, overwrite=False):
         """Write DistortedGrid instance to a FITS file."""
