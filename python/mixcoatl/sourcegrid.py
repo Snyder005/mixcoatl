@@ -18,6 +18,23 @@ from astropy.table import Table, Column
 import lsst.afw.fits as afwFits
 
 class DistortedGrid:
+    """A distorted grid of sources.
+
+    Parameters
+    ----------
+    ystep : `float`
+        Number of pixels between rows of the grid.
+    xstep : `float`
+        Number of pixels between columns of the grid.
+    theta : `float`
+        Rotation of the grid in radians from the coordinate axes.
+    ncols : `int`, optional
+        Number of grid columns. Default is 49.
+    nrows : `int`, optional
+        Number of grid rows. Default is 49.
+    normalized_shifts : `tuple` [`numpy.ndarray`]
+        A sequence of arrays containing normalized shifts in Y-axis and X-axis.
+    """
 
     def __init__(self, ystep, xstep, theta, y0, x0, ncols=49, nrows=49, normalized_shifts=None):
 
@@ -66,13 +83,15 @@ class DistortedGrid:
             Name of the file to read.
         hdu : `int`
             Number of the "header-data unit" to read (where 0 is the Primary HDU).
+            The default value of `afw.fits.DEFAULT_HDU` is interpreted as "the first
+            HDU with NAXIS != 0".
         
         Returns
         -------
         grid : `mixcoatl.sourcegrid.DistortedGrid`
             Resulting distorted grid of sources.
         """
-        table = Table.read(infile, hdu=hdu, format='fits')
+        table = Table.read(filename, hdu=hdu, format='fits')
 
         return cls.from_astropy(table)
 
