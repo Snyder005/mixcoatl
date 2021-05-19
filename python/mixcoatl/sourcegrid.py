@@ -1,7 +1,7 @@
 """Source grid fitting classes and functions.
 
 To Do:
-   * Rework DistortedGrid object in context of DM as a calibration object.
+   * Add docstrings to module functions.
 """
 from __future__ import print_function
 from __future__ import absolute_import
@@ -56,7 +56,7 @@ class DistortedGrid:
             self.set_normalized_shifts(norm_dy, norm_dx)
 
     @classmethod
-    def read_ecvs(cls, filename):
+    def read_ecsv(cls, filename):
         """Read a ECSV ASCII table from a regular file.
 
         Parameters
@@ -182,7 +182,7 @@ class DistortedGrid:
                 'GRID_NROWS' : self.nrows,
                 'GRID_NCOLS' : self.ncols}
 
-        cols = [Column(range(nrows*ncols), name='spotgrid_index', dtype='>i4'),
+        cols = [Column(range(self.nrows*self.ncols), name='spotgrid_index', dtype='>i4'),
                 Column(self._norm_dy, name='spotgrid_normalized_dy', dtype='>f8'),
                 Column(self._norm_dx, name='spotgrid_normalized_dx', dtype='>f8')]
 
