@@ -147,7 +147,7 @@ class GridFitTask(pipeBase.PipelineTask):
 
         all_gridY[mask] = gridY[match_indices[:, 0]]
         all_gridX[mask] = gridX[match_indices[:, 0]]
-        all_gridIndex[mask] = match_indices[:, 0]        
+        all_gridIndex[mask] = match_indices[:, 0] 
         dy = all_srcY - all_gridY
         dx = all_srcX - all_gridX
         all_normDY = (np.sin(-grid.theta)*dx + np.cos(-grid.theta)*dy)/grid.ystep

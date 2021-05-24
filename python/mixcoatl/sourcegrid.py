@@ -29,11 +29,12 @@ class DistortedGrid:
     theta : `float`
         Rotation of the grid in radians from the coordinate axes.
     ncols : `int`, optional
-        Number of grid columns. Default is 49.
+        Number of grid columns (the default is 49).
     nrows : `int`, optional
-        Number of grid rows. Default is 49.
-    normalized_shifts : `tuple` [`numpy.ndarray`]
-        A sequence of arrays containing normalized shifts in Y-axis and X-axis.
+        Number of grid rows (the default is 49).
+    normalized_shifts : `tuple` [`numpy.ndarray`], optional
+        A sequence of arrays of normalized shifts in Y-axis and X-axis (the 
+        default is `None`, which implies no normalized shifts to be included).
     """
 
     def __init__(self, ystep, xstep, theta, y0, x0, ncols=49, nrows=49, normalized_shifts=None):
@@ -81,7 +82,7 @@ class DistortedGrid:
         ----------
         filename : `str`
             Name of the file to read.
-        hdu : `int`
+        hdu : `int`, optional
             Number of the "header-data unit" to read (where 0 is the Primary HDU).
             The default value of `afw.fits.DEFAULT_HDU` is interpreted as "the first
             HDU with NAXIS != 0".
@@ -135,10 +136,14 @@ class DistortedGrid:
 
     @property
     def norm_dx(self):
+        """X-axis normalized shifts. (`numpy.ndarray`, read-only)
+        """
         return self._norm_dx
 
     @property
     def norm_dy(self):
+        """Y-axis normalized shifts. (`numpy.ndarray`, read-only)
+        """
         return self._norm_dy
 
     def set_normalized_shifts(self, norm_dy, norm_dx):
@@ -210,8 +215,8 @@ class DistortedGrid:
         
         Parameters
         ----------
-        include_coordinate_shifts : `bool`
-            `True` if coordinate shifts are applied to centroids.
+        include_coordinate_shifts : `bool`, optional
+            Apply coordinate shifts to centroids if `True`.
 
         Returns
         -------
@@ -264,14 +269,40 @@ class DistortedGrid:
         filename : `str`
             Name of the file to write.
         overwrite : `bool`, optional
-            If `True` overwrite existing file. The default is `True`.
+            Overwrite existing file if `True`.
         """
         table = self.as_astropy()
         table.write(filename, format='fits', overwrite=overwrite)
 
 def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
-    """Calculate the distances between two sets of points."""
-    
+    """Calculate the distances between two sets of points.
+
+    Parameters
+    ----------
+    y0 : `numpy.ndarray`, (N0,)
+        An array of Y-axis centroid coordinates for first list of sources.
+    x0 : `numpy.ndarray`, (N0,)
+        An array of X-axis centroid coordinates for first list of sources.
+    y1 : `numpy.ndarray`, (N1,)
+        An array of Y-axis centroid coordinates for second list of sources.
+    x1 : `numpy.ndarray`, (N1,)
+        An array of X-axis centroid coordinates for second list of sources.
+    metric : `str`, optional
+        The distance metric to use (the default is 'euclidean'). The distance
+        function can be 'braycurtis', 'canberra', 'chebyshev', 'cityblock', 
+        'correlation', 'cosine', 'dice', 'euclidean', 'hamming', 'jaccard', 
+        'jensenshannon', 'kulsinski', 'mahalanobis', 'matching', 'minkowski', 
+        'rogerstanimoto', 'russellrao', 'seuclidean', 'sokalmichener', 
+        'sokalsneath', 'sqeuclidean', 'wminkowski', 'yule'.
+
+    Returns
+    -------
+    indices : `numpy.ndarray`, (N0, N1)
+        A matrix of indices that would sort the distance matrix.
+    distances : `numpy.ndarray`, (N0, N1)
+        A sorted distance matrix between two lists of source coordinates that 
+        has been sorted by distance (axis 1) lowest-to-highest.
+    """
     coords0 = np.stack([y0, x0], axis=1)
     coords1 = np.stack([y1, x1], axis=1)
     
@@ -282,25 +313,35 @@ def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     
     return indices, distances
 
-def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None, 
-              bbox=None):
-    """Calculate sum of positional errors of true source grid and model grid.
+def fit_error(params, src_y, src_x, ncols, nrows, normalized_shifts=None, bbox=None):
+    """Calculate distance between grid model and detected source centroids.
     
-    For every true source, the distance to the nearest neighbor source 
-    from a model source grid is calculated.  The mean for every true source
-    is taken as the fit error between true source grid and model grid.
-       
-    Args:
-        params (list): List of grid parameters.
-        srcY (numpy.ndarray): Array of source y-positions.
-        srcX (numpy.ndarray): Array of source x-positions.
-        nrows (int): Number of grid rows.
-        ncols (int): Number of grid columns.
-        
-    Returns:
-        Float representing sum of nearest neighbor distances.
+    Parameters
+    ----------
+    params : `list` [`float`]
+        A sequence (`list`, for example) of grid parameters.
+    src_y : `numpy.ndarray`, (N,)
+        An array of Y-axis centroid coordinates.
+    src_x : `numpy.ndarray`, (N,)
+        An array of X-axis centroid coordinates.
+    ncols : `int`
+        Number of grid columns.
+    nrows : `int`
+        Number of grid rows.
+    normalized_shifts : `tuple` [`numpy.ndarray`], optional
+        A sequence of arrays of normalized shifts in Y-axis and X-axis (the
+        default is `None`, which implies no normalized shifts to be included).
+    bbox : `lsst.geom.Box2I`, optional
+        An integer coordinate rectangle corresponding to detector geometry
+        (the default is `None`, which implies no detector geometry information
+        will be used).
+
+    Returns
+    -------
+    nn_distances : `numpy.ndarray`
+        An array of nearest-neighbor distances between detected source and
+        grid model centroids.
     """
-    
     ## Fit parameters
     parvals = params.valuesdict()
     ystep = parvals['ystep']
@@ -312,7 +353,7 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
     ## Create grid model and construct x/y coordinate arrays
     grid = DistortedGrid(ystep, xstep, theta, y0, x0, ncols, nrows,
                          normalized_shifts=normalized_shifts)    
-    gY, gX = grid.get_centroids(include_centroid_shifts=True)
+    grid_y, grid_x = grid.get_centroids(include_centroid_shifts=True)
 
     ## Filter source grid positions according to CCD geometry
     if bbox is not None:
@@ -321,21 +362,54 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
         xmin = 0
         xmax = bbox.getWidth()
 
-        mask = (gY < ymax)*(gY > ymin)*(gX < xmax)*(gX > xmin)
-        gY = gY[mask]
-        gX = gX[mask]
+        mask = (grid_y < ymax)*(grid_y > ymin)*(grid_x < xmax)*(grid_x > xmin)
+        grid_y = grid_y[mask]
+        grid_x = grid_x[mask]
 
     ## Calculate residuals   
-    indices, distances = coordinate_distances(srcY, srcX, gY, gX)
+    indices, distances = coordinate_distances(src_y, src_x, grid_y, grid_x)
 
-    return distances[:, 0]
+    nn_distances = distances[:, 0]
 
-def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
+    return nn_distances
+
+def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False, 
              method='least_squares', normalized_shifts=None, bbox=None):
+    """Optimize grid model parameters to match detected source centroids.
 
+    Parameters
+    ----------
+    src_y : `numpy.ndarray`, (N,)
+        An array of Y-axis centroid coordinates.
+    src_x : `numpy.ndarray`, (N,)
+        An array of X-axis centroid coordinates.
+    ncols : `int`
+        Number of grid columns.
+    nrows : `int`
+        Number of grid rows.
+    vary_theta : `bool`, optional
+        Allow the grid rotation angle parameter to vary during model fit if
+        `True`.
+    method : `str`, optional
+        Name of the fitting method to use (the default is 'least_squares').
+    normalized_shifts : `tuple` [`numpy.ndarray`], optional
+        A sequence of arrays of normalized shifts in Y-axis and X-axis (the
+        default is `None`, which implies no normalized shifts to be included).
+    bbox : `lsst.geom.Box2I`, optional
+        An integer coordinate rectangle corresponding to detector geometry
+        (the default is `None`, which implies no detector geometry information
+        will be used).
+
+    Returns
+    -------
+    grid : `mixcoatl.sourcegrid.DistortedGrid`
+        Optimized grid model.
+    result : `lmfit.minimizer.MinimizerResult`
+        The results of the grid model optimization.
+    """
     ## Calculate mean xstep/ystep
-    nsources = srcY.shape[0]
-    indices, distances = coordinate_distances(srcY, srcX, srcY, srcX)
+    nsources = src_y.shape[0]
+    indices, distances = coordinate_distances(src_y, src_x, src_y, src_x)
     nn_indices = indices[:, 1:5]
     nn_distances = distances[:, 1:5]
     med_dist = np.median(nn_distances)
@@ -346,15 +420,15 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
 
     for i in range(nsources):
 
-        yc = srcY[i]
-        xc = srcX[i]
+        yc = src_y[i]
+        xc = src_x[i]
 
         for j in range(4):
 
             nn_dist = nn_distances[i, j]
             if np.abs(nn_dist - med_dist) > 10.: continue
-            y_nn = srcY[nn_indices[i, j]]
-            x_nn = srcX[nn_indices[i, j]]
+            y_nn = src_y[nn_indices[i, j]]
+            x_nn = src_x[nn_indices[i, j]]
 
             if x_nn > xc:
                 if y_nn > yc:
@@ -374,7 +448,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
         ystep = np.nanmedian(dist2_array)
 
     ## Find initial guess for grid center based on orientation
-    grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta)
+    grid_center_guess = find_midpoint_guess(src_y, src_x, xstep, ystep, theta)
     y0_guess, x0_guess = grid_center_guess[1], grid_center_guess[0]    
     
     ## Define fit parameters
@@ -385,7 +459,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
     params.add('x0', value=x0_guess, min=x0_guess-3., max=x0_guess+3., vary=True)
     params.add('theta', value=theta, min=theta-0.5*np.pi/180., max=theta+0.5*np.pi/180., vary=False)
     
-    minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
+    minner = Minimizer(fit_error, params, fcn_args=(src_y, src_x, ncols, nrows),
                        fcn_kws={'normalized_shifts' : normalized_shifts,
                                 'bbox' : bbox}, nan_policy='omit')
     result = minner.minimize(params=params, method=method, max_nfev=None)
@@ -398,7 +472,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
         params['y0'].set(value=result_values['y0'], vary=False)
         params['x0'].set(value=result_values['x0'], vary=False)
         params['theta'].set(vary=True)
-        theta_minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
+        theta_minner = Minimizer(fit_error, params, fcn_args=(src_y, src_x, ncols, nrows),
                        fcn_kws={'normalized_shifts' : normalized_shifts,
                                 'bbox' : bbox}, nan_policy='omit')
         theta_result = theta_minner.minimize(params=params, method=method, max_nfev=None)
@@ -412,7 +486,6 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
     
     return grid, result
 
-
 def minimum_bounding_rectangle(points):
     """
     Find the smallest bounding rectangle for a set of points.
@@ -423,7 +496,6 @@ def minimum_bounding_rectangle(points):
     
     Used to calculate initial guess for grid center.
     """
-
     # Get the convex hull for the points
     simplicies = points[ConvexHull(points).vertices]
 
@@ -478,7 +550,6 @@ def minimum_bounding_rectangle(points):
 def find_midpoint_guess(Y, X, xstep, ystep, theta):
     """Calculate an initial midpoint guess. Works for side, corner, 
        and full grid exposure"""
-    
     # Get the star positions
     points = [[x,y] for x,y in zip(X,Y)]
     points_centroid = np.mean(points, axis=0)
@@ -523,8 +594,8 @@ def find_midpoint_guess(Y, X, xstep, ystep, theta):
 def fit_check(srcX, srcY, gX, gY):
     """Returns the X & Y residuals of the fit, number of identified stars, 
        number of missing stars (ideal grid points without corresponding stars),
-       and the X/Y coordinates of outliers (<5th and >95th percentile)."""
-
+       and the X/Y coordinates of outliers (<5th and >95th percentile).
+    """
     residualsX = []
     residualsY = []
     identified_points = [[x,y] for x,y in zip(srcX, srcY)]
