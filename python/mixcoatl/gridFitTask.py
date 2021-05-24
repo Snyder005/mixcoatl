@@ -77,6 +77,26 @@ class GridFitConfig(pipeBase.PipelineTaskConfig,
         default=False,
         doc="Use centroid shifts from grid calibration table?"
     )
+    shapeLowerBound = Field(
+        dtype=float,
+        default=0.1,
+        doc="Lower bound on source second moment; used for masking."
+    )
+    shapeUpperBound = Field(
+        dtype=float,
+        default=50.,
+        doc="Upper bound on source second moment; used for masking."
+    )
+    neighborDistanceLowerBound = Field(
+        dtype=float,
+        default=40.,
+        doc="Lower bound on distance to nearest source neighbor; used for masking."
+    )
+    neighborDistanceUpperBound = Field(
+        dtype=float,
+        default=100.,
+        doc="Upper bound on distance to nearest source neighbor; used for masking."
+    )
 
 class GridFitTask(pipeBase.PipelineTask):
 
@@ -89,15 +109,17 @@ class GridFitTask(pipeBase.PipelineTask):
         all_srcX = inputCat['slot_Centroid_x']
         
         ## Mask sources by shape
-        quality_mask = (inputCat['slot_Shape_xx'] > 0.1) \
-                     * (inputCat['slot_Shape_xx'] < 50.)  \
-                     * (inputCat['slot_Shape_yy'] > 0.1) \
-                     * (inputCat['slot_Shape_yy'] < 50.)
+        quality_mask = (inputCat['slot_Shape_xx'] > self.config.shapeLowerBound) \
+                     * (inputCat['slot_Shape_xx'] < self.config.shapeUpperBound) \
+                     * (inputCat['slot_Shape_yy'] > self.config.shapeLowerBound) \
+                     * (inputCat['slot_Shape_yy'] < self.config.shapeUpperBound)
 
         ## Mask sources by distance to neighbors
         indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
-        outlier_mask = ((distances[:,1] < 100.) & (distances[:,1] > 40.)) & \
-            ((distances[:,2] < 100.) & (distances[:,2] > 40.))
+        outlier_mask = (distances[:,1] < self.config.neighborDistanceUpperBound) \
+                     * (distances[:,1] > self.config.neighborDistanceLowerBound) \
+                     * (distances[:,2] < self.config.neighborDistanceUpperBound) \
+                     * (distances[:,2] > self.config.neighborDistanceLowerBound)
 
         mask = quality_mask & outlier_mask
         srcY = all_srcY[mask]

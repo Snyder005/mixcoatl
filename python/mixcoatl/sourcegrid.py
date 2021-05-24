@@ -373,7 +373,7 @@ def fit_error(params, src_y, src_x, ncols, nrows, normalized_shifts=None, bbox=N
 
     return nn_distances
 
-def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False, 
+def grid_fit(src_y, src_x, ncols, nrows, vary_theta=False, 
              method='least_squares', normalized_shifts=None, bbox=None):
     """Optimize grid model parameters to match detected source centroids.
 
