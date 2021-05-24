@@ -1,7 +1,7 @@
 """Source grid fitting classes and functions.
 
 To Do:
-   * Rework DistortedGrid object in context of DM as a calibration object.
+   * Add docstrings to module functions.
 """
 from __future__ import print_function
 from __future__ import absolute_import
@@ -13,11 +13,31 @@ from lmfit import Minimizer, Parameters, fit_report
 from scipy import optimize
 from scipy.spatial import ConvexHull, convex_hull_plot_2d, distance
 from itertools import product
+from astropy.table import Table, Column
+
+import lsst.afw.fits as afwFits
 
 class DistortedGrid:
+    """A distorted grid of sources.
 
-    def __init__(self, ystep, xstep, theta, y0, x0, ncols=49, nrows=49, 
-                 normalized_shifts=None):
+    Parameters
+    ----------
+    ystep : `float`
+        Number of pixels between rows of the grid.
+    xstep : `float`
+        Number of pixels between columns of the grid.
+    theta : `float`
+        Rotation of the grid in radians from the coordinate axes.
+    ncols : `int`, optional
+        Number of grid columns (the default is 49).
+    nrows : `int`, optional
+        Number of grid rows (the default is 49).
+    normalized_shifts : `tuple` [`numpy.ndarray`], optional
+        A sequence of arrays of normalized shifts in Y-axis and X-axis (the 
+        default is `None`, which implies no normalized shifts to be included).
+    """
+
+    def __init__(self, ystep, xstep, theta, y0, x0, ncols=49, nrows=49, normalized_shifts=None):
 
         ## Ideal grid parameters
         self.nrows = nrows
@@ -28,148 +48,261 @@ class DistortedGrid:
         self.y0 = y0
         self.x0 = x0
 
-        self.make_source_grid()
+        self._norm_dy = np.zeros(nrows*ncols)
+        self._norm_dx = np.zeros(nrows*ncols)
 
         ## Add centroid shifts
-        if normalized_shifts is None:
-            self._norm_dy = np.zeros(nrows*ncols)
-            self._norm_dx = np.zeros(nrows*ncols)
-        else:
-            self.add_normalized_shifts(normalized_shifts)
+        if normalized_shifts is not None:
+            norm_dy, norm_dx = normalized_shifts
+            self.set_normalized_shifts(norm_dy, norm_dx)
 
     @classmethod
-    def from_fits(cls, infile):
-        """Initialize DistortedGrid instance from a FITS file."""
+    def read_ecsv(cls, filename):
+        """Read a ECSV ASCII table from a regular file.
 
-        with fits.open(infile) as hdulist:
-            x0 = hdulist['GRID_INFO'].header['X0']
-            y0 = hdulist['GRID_INFO'].header['Y0']
-            theta = hdulist['GRID_INFO'].header['THETA']
-            xstep = hdulist['GRID_INFO'].header['XSTEP']
-            ystep = hdulist['GRID_INFO'].header['YSTEP']
-            ncols = hdulist['GRID_INFO'].header['NCOLS']
-            nrows = hdulist['GRID_INFO'].header['NROWS']
+        Parameters
+        ----------
+        filename : `str`
+            Name of the file to read.
 
-            norm_dy = hdulist[-1].data['NORMALIZED_DY']
-            norm_dx = hdulist[-1].data['NORMALIZED_DX']
+        Returns
+        -------
+        grid : `mixcoatl.sourcegrid.DistortedGrid`
+            Resulting distorted grid of sources.
+        """
+        table = Table.read(filename, format='ascii.ecsv')
+
+        return cls.from_astropy(table)
+
+    @classmethod
+    def read_fits(cls, filename, hdu=afwFits.DEFAULT_HDU):
+        """Read a FITS binary table from a regular file.
+
+        Parameters
+        ----------
+        filename : `str`
+            Name of the file to read.
+        hdu : `int`, optional
+            Number of the "header-data unit" to read (where 0 is the Primary HDU).
+            The default value of `afw.fits.DEFAULT_HDU` is interpreted as "the first
+            HDU with NAXIS != 0".
+        
+        Returns
+        -------
+        grid : `mixcoatl.sourcegrid.DistortedGrid`
+            Resulting distorted grid of sources.
+        """
+        table = Table.read(filename, hdu=hdu, format='fits')
+
+        return cls.from_astropy(table)
+
+    @classmethod
+    def from_astropy(cls, table):
+        """Initialize from an Astropy Table.
+
+        Parameters
+        ----------
+        table : `astropy.table.Table`
+
+        Returns
+        -------
+        grid : `mixcoatl.sourcegrid.DistortedGrid`
+            Resulting distorted grid of sources.
+        """
+        meta = table.meta
+
+        y0 = meta['GRID_Y0']
+        x0 = meta['GRID_X0']
+        theta = meta['GRID_THETA']
+        ystep = meta['GRID_YSTEP']
+        xstep = meta['GRID_XSTEP']
+        nrows = meta['GRID_NROWS']
+        ncols = meta['GRID_NCOLS']
+
+        norm_dy = np.zeros(nrows*ncols)
+        norm_dx = np.zeros(nrows*ncols)
+
+        all_grid_index = table['spotgrid_index']
+        all_norm_dy = table['spotgrid_normalized_dy']
+        all_norm_dx = table['spotgrid_normalized_dx']
+
+        select = all_grid_index >= 0
+
+        norm_dy[all_grid_index[select]] = all_norm_dy[select]
+        norm_dx[all_grid_index[select]] = all_norm_dx[select]
 
         return cls(ystep, xstep, theta, y0, x0, nrows, ncols, 
                    normalized_shifts=(norm_dy, norm_dx))
-    
+
     @property
     def norm_dx(self):
+        """X-axis normalized shifts. (`numpy.ndarray`, read-only)
+        """
         return self._norm_dx
 
     @property
     def norm_dy(self):
+        """Y-axis normalized shifts. (`numpy.ndarray`, read-only)
+        """
         return self._norm_dy
 
-    @property
-    def x(self):
-        return self._x
+    def set_normalized_shifts(self, norm_dy, norm_dx):
+        """Replace existing normalized shifts.
+        
+        Parameters
+        ----------
+        norm_dy : `numpy.ndarray`
+            An array of Y-axis normalized shifts.
+        norm_dx : `numpy.ndarray`
+            An array of X-axis normalized shifts.
 
-    @property
-    def y(self):
-        return self._y
-
-    def add_centroid_shifts(self, centroid_shifts):
-        """Calculate and add the normalized source centroid shifts."""
-
-        dy, dx = centroid_shifts
-
-        ## Rotate and normalize centroid_shifts
-        norm_dx = (np.cos(-self.theta)*dx - np.sin(-self.theta)*dy)/self.xstep
-        norm_dy = (np.sin(-self.theta)*dx + np.cos(-self.theta)*dy)/self.ystep
-
-        self.add_normalized_shifts((norm_dy, norm_dx))
-
-    def add_normalized_shifts(self, normalized_shifts):
-        """Add the normalized source centroid shifts."""
-
-        norm_dy, norm_dx = normalized_shifts
+        Raises
+        ------
+        ValueError
+            Raised if normalized shift array lengths do not match total number of 
+            sources.
+        """
         nsources = self.nrows*self.ncols
 
         if (norm_dy.shape[0]==nsources)*(norm_dx.shape[0]==nsources):
             self._norm_dy = norm_dy
             self._norm_dx = norm_dx
+        else:
+            raise ValueError('Array lengths do not match: ({0}, {1}), ({2}, {2})'\
+                .format(norm_dy.shape[0], norm_dx.shape[0], nrows*ncols))
 
-    def make_grid_hdu(self):
-        """Create an HDU with grid information."""
+    def as_astropy(self):
+        """Create a table with distorted grid parameters.
+        
+        Returns
+        -------
+        table : `astropy.table.Table`
+            Table containing distorted grid parameters.
+        """
+        meta = {'GRID_Y0' : self.y0,
+                'GRID_X0' : self.x0,
+                'GRID_YSTEP' : self.ystep,
+                'GRID_XSTEP' : self.xstep,
+                'GRID_THETA' : self.theta,
+                'GRID_NROWS' : self.nrows,
+                'GRID_NCOLS' : self.ncols}
 
-        hdr = fits.Header()
-        hdr['X0'] = self.x0
-        hdr['Y0'] = self.y0
-        hdr['XSTEP'] = self.xstep
-        hdr['YSTEP'] = self.ystep
-        hdr['THETA'] = self.theta
-        hdr['NCOLS'] = self.ncols
-        hdr['NROWS'] = self.nrows
+        cols = [Column(range(self.nrows*self.ncols), name='spotgrid_index', dtype='>i4'),
+                Column(self._norm_dy, name='spotgrid_normalized_dy', dtype='>f8'),
+                Column(self._norm_dx, name='spotgrid_normalized_dx', dtype='>f8')]
 
-        ## Optic shifts HDU
-        cols = [fits.Column('NORMALIZED_DY', array=self.norm_dy, format='D'),
-                fits.Column('NORMALIZED_DX', array=self.norm_dx, format='D')]
-        tablehdu = fits.BinTableHDU.from_columns(cols, header=hdr,
-                                                 name='GRID_INFO')
+        table = Table(cols, meta=meta)
 
-        return tablehdu
-
-    def make_source_grid(self):
-        """Make rectilinear grid of sources."""
-
-        ## Create a standard nrows x ncols grid of points
-        y_array = np.asarray([n*self.ystep - (self.nrows-1)*self.ystep/2. \
-                                  for n in range(self.nrows)])
-        x_array = np.asarray([n*self.xstep - (self.ncols-1)*self.xstep/2. \
-                                  for n in range(self.ncols)])
-        y, x = np.meshgrid(y_array, x_array)
-
-        self._y = y.flatten()
-        self._x = x.flatten()
+        return table
 
     def get_centroid_shifts(self):
-        """Return the centroid shifts given the grid geometry."""
-
+        """Return the centroid shifts given the distorted grid parameters.
+        
+        Returns
+        -------
+        dy : `numpy.ndarray`
+            An array of Y-axis centroid shifts.
+        dx : `numpy.ndarray`
+            An array of X-axis centroid shifts.
+        """
         dx = (np.cos(self.theta)*self.norm_dx - np.sin(self.theta)*self.norm_dy)*self.xstep
         dy = (np.sin(self.theta)*self.norm_dx + np.cos(self.theta)*self.norm_dy)*self.ystep
 
         return dy, dx
 
-    def get_source_centroids(self, distorted=True):
-        """Return source centroids given the grid geometry."""
-
-        ## Add scaled centroid shifts
-        if distorted:
-            y = self.y + self.norm_dy*self.ystep
-            x = self.x + self.norm_dx*self.xstep
-        else:
-            y = self.y
-            x = self.x
+    def get_centroids(self, include_centroid_shifts=False):
+        """Get source centroids given the distorted grid parameters.
         
-        ## Rotate grid using rotation matrix
-        xr = (np.cos(self.theta)*x - np.sin(self.theta)*y).flatten()
-        yr = (np.sin(self.theta)*x + np.cos(self.theta)*y).flatten()
+        Parameters
+        ----------
+        include_coordinate_shifts : `bool`, optional
+            Apply coordinate shifts to centroids if `True`.
+
+        Returns
+        -------
+        y : `numpy.ndarray`
+            An array of Y-axis centroid coordinates.
+        x : `numpy.ndarray`
+            An array of X-axis centroid coordinates.
+        """
+        ## Make rectilinear grid
+        row_spacings = np.asarray([n*self.ystep - (self.nrows-1)*self.ystep/2. \
+                                  for n in range(self.nrows)])
+        column_spacings = np.asarray([n*self.xstep - (self.ncols-1)*self.xstep/2. \
+                                  for n in range(self.ncols)])
+        rect_y, rect_x = np.meshgrid(row_spacings, column_spacings)
+
+        rect_y = rect_y.flatten()
+        rect_x = rect_x.flatten()
+
+        ## Optionally add scaled centroid shifts
+        if include_centroid_shifts:
+            rect_y += self.norm_dy*self.ystep
+            rect_x += self.norm_dx*self.xstep
         
-        ## Move center of grid to desired x/y center coordinates
-        xr += self.x0
-        yr += self.y0
+        ## Rotate coordinates
+        y = np.sin(self.theta)*rect_x + np.cos(self.theta)*rect_y
+        x = np.cos(self.theta)*rect_x - np.sin(self.theta)*rect_y
         
-        ## Return the flattened arrays
-        return yr, xr
+        ## Translate coordinates
+        y += self.y0
+        x += self.x0
+        
+        return y, x
 
-    def write_fits(self, outfile, **kwargs):
-        """Write DistortedGrid instance to a FITS file."""
+    def write_ecvs(self, filename):
+        """Write a `DistortedGrid` to a ASCII ECSV file.
 
-        ## Write grid HDU with minimal PrimaryHDU
-        hdr = fits.Header()
-        prihdu = fits.PrimaryHDU(header=hdr)
-        tablehdu = self.make_grid_hdu()
-        hdulist = fits.HDUList([prihdu, tablehdu])
+        Parameters
+        ----------
+        filename : `str`
+            Name of the file to write.
+        """
+        table = self.as_astropy()
+        table.write(filename, format='ascii.ecsv')
 
-        hdulist.writeto(outfile, **kwargs)
+    def write_fits(self, outfile, overwrite=False):
+        """Write a `DistortedGrid` to a regular multi-extension FITS file.
+
+        Parameters
+        ----------
+        filename : `str`
+            Name of the file to write.
+        overwrite : `bool`, optional
+            Overwrite existing file if `True`.
+        """
+        table = self.as_astropy()
+        table.write(filename, format='fits', overwrite=overwrite)
 
 def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
-    """Calculate the distances between two sets of points."""
-    
+    """Calculate the distances between two sets of points.
+
+    Parameters
+    ----------
+    y0 : `numpy.ndarray`, (N0,)
+        An array of Y-axis centroid coordinates for first list of sources.
+    x0 : `numpy.ndarray`, (N0,)
+        An array of X-axis centroid coordinates for first list of sources.
+    y1 : `numpy.ndarray`, (N1,)
+        An array of Y-axis centroid coordinates for second list of sources.
+    x1 : `numpy.ndarray`, (N1,)
+        An array of X-axis centroid coordinates for second list of sources.
+    metric : `str`, optional
+        The distance metric to use (the default is 'euclidean'). The distance
+        function can be 'braycurtis', 'canberra', 'chebyshev', 'cityblock', 
+        'correlation', 'cosine', 'dice', 'euclidean', 'hamming', 'jaccard', 
+        'jensenshannon', 'kulsinski', 'mahalanobis', 'matching', 'minkowski', 
+        'rogerstanimoto', 'russellrao', 'seuclidean', 'sokalmichener', 
+        'sokalsneath', 'sqeuclidean', 'wminkowski', 'yule'.
+
+    Returns
+    -------
+    indices : `numpy.ndarray`, (N0, N1)
+        A matrix of indices that would sort the distance matrix.
+    distances : `numpy.ndarray`, (N0, N1)
+        A sorted distance matrix between two lists of source coordinates that 
+        has been sorted by distance (axis 1) lowest-to-highest.
+    """
     coords0 = np.stack([y0, x0], axis=1)
     coords1 = np.stack([y1, x1], axis=1)
     
@@ -180,25 +313,35 @@ def coordinate_distances(y0, x0, y1, x1, metric='euclidean'):
     
     return indices, distances
 
-def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None, 
-              bbox=None):
-    """Calculate sum of positional errors of true source grid and model grid.
+def fit_error(params, src_y, src_x, ncols, nrows, normalized_shifts=None, bbox=None):
+    """Calculate distance between grid model and detected source centroids.
     
-    For every true source, the distance to the nearest neighbor source 
-    from a model source grid is calculated.  The mean for every true source
-    is taken as the fit error between true source grid and model grid.
-       
-    Args:
-        params (list): List of grid parameters.
-        srcY (numpy.ndarray): Array of source y-positions.
-        srcX (numpy.ndarray): Array of source x-positions.
-        nrows (int): Number of grid rows.
-        ncols (int): Number of grid columns.
-        
-    Returns:
-        Float representing sum of nearest neighbor distances.
+    Parameters
+    ----------
+    params : `list` [`float`]
+        A sequence (`list`, for example) of grid parameters.
+    src_y : `numpy.ndarray`, (N,)
+        An array of Y-axis centroid coordinates.
+    src_x : `numpy.ndarray`, (N,)
+        An array of X-axis centroid coordinates.
+    ncols : `int`
+        Number of grid columns.
+    nrows : `int`
+        Number of grid rows.
+    normalized_shifts : `tuple` [`numpy.ndarray`], optional
+        A sequence of arrays of normalized shifts in Y-axis and X-axis (the
+        default is `None`, which implies no normalized shifts to be included).
+    bbox : `lsst.geom.Box2I`, optional
+        An integer coordinate rectangle corresponding to detector geometry
+        (the default is `None`, which implies no detector geometry information
+        will be used).
+
+    Returns
+    -------
+    nn_distances : `numpy.ndarray`
+        An array of nearest-neighbor distances between detected source and
+        grid model centroids.
     """
-    
     ## Fit parameters
     parvals = params.valuesdict()
     ystep = parvals['ystep']
@@ -210,7 +353,7 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
     ## Create grid model and construct x/y coordinate arrays
     grid = DistortedGrid(ystep, xstep, theta, y0, x0, ncols, nrows,
                          normalized_shifts=normalized_shifts)    
-    gY, gX = grid.get_source_centroids()
+    grid_y, grid_x = grid.get_centroids(include_centroid_shifts=True)
 
     ## Filter source grid positions according to CCD geometry
     if bbox is not None:
@@ -219,21 +362,54 @@ def fit_error(params, srcY, srcX, nrows, ncols, normalized_shifts=None,
         xmin = 0
         xmax = bbox.getWidth()
 
-        mask = (gY < ymax)*(gY > ymin)*(gX < xmax)*(gX > xmin)
-        gY = gY[mask]
-        gX = gX[mask]
+        mask = (grid_y < ymax)*(grid_y > ymin)*(grid_x < xmax)*(grid_x > xmin)
+        grid_y = grid_y[mask]
+        grid_x = grid_x[mask]
 
     ## Calculate residuals   
-    indices, distances = coordinate_distances(srcY, srcX, gY, gX)
+    indices, distances = coordinate_distances(src_y, src_x, grid_y, grid_x)
 
-    return distances[:, 0]
+    nn_distances = distances[:, 0]
 
-def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
+    return nn_distances
+
+def grid_fit(src_y, src_x, ncols, nrows, vary_theta=False, 
              method='least_squares', normalized_shifts=None, bbox=None):
+    """Optimize grid model parameters to match detected source centroids.
 
+    Parameters
+    ----------
+    src_y : `numpy.ndarray`, (N,)
+        An array of Y-axis centroid coordinates.
+    src_x : `numpy.ndarray`, (N,)
+        An array of X-axis centroid coordinates.
+    ncols : `int`
+        Number of grid columns.
+    nrows : `int`
+        Number of grid rows.
+    vary_theta : `bool`, optional
+        Allow the grid rotation angle parameter to vary during model fit if
+        `True`.
+    method : `str`, optional
+        Name of the fitting method to use (the default is 'least_squares').
+    normalized_shifts : `tuple` [`numpy.ndarray`], optional
+        A sequence of arrays of normalized shifts in Y-axis and X-axis (the
+        default is `None`, which implies no normalized shifts to be included).
+    bbox : `lsst.geom.Box2I`, optional
+        An integer coordinate rectangle corresponding to detector geometry
+        (the default is `None`, which implies no detector geometry information
+        will be used).
+
+    Returns
+    -------
+    grid : `mixcoatl.sourcegrid.DistortedGrid`
+        Optimized grid model.
+    result : `lmfit.minimizer.MinimizerResult`
+        The results of the grid model optimization.
+    """
     ## Calculate mean xstep/ystep
-    nsources = srcY.shape[0]
-    indices, distances = coordinate_distances(srcY, srcX, srcY, srcX)
+    nsources = src_y.shape[0]
+    indices, distances = coordinate_distances(src_y, src_x, src_y, src_x)
     nn_indices = indices[:, 1:5]
     nn_distances = distances[:, 1:5]
     med_dist = np.median(nn_distances)
@@ -244,15 +420,15 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
 
     for i in range(nsources):
 
-        yc = srcY[i]
-        xc = srcX[i]
+        yc = src_y[i]
+        xc = src_x[i]
 
         for j in range(4):
 
             nn_dist = nn_distances[i, j]
             if np.abs(nn_dist - med_dist) > 10.: continue
-            y_nn = srcY[nn_indices[i, j]]
-            x_nn = srcX[nn_indices[i, j]]
+            y_nn = src_y[nn_indices[i, j]]
+            x_nn = src_x[nn_indices[i, j]]
 
             if x_nn > xc:
                 if y_nn > yc:
@@ -272,7 +448,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
         ystep = np.nanmedian(dist2_array)
 
     ## Find initial guess for grid center based on orientation
-    grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta)
+    grid_center_guess = find_midpoint_guess(src_y, src_x, xstep, ystep, theta)
     y0_guess, x0_guess = grid_center_guess[1], grid_center_guess[0]    
     
     ## Define fit parameters
@@ -283,7 +459,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
     params.add('x0', value=x0_guess, min=x0_guess-3., max=x0_guess+3., vary=True)
     params.add('theta', value=theta, min=theta-0.5*np.pi/180., max=theta+0.5*np.pi/180., vary=False)
     
-    minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
+    minner = Minimizer(fit_error, params, fcn_args=(src_y, src_x, ncols, nrows),
                        fcn_kws={'normalized_shifts' : normalized_shifts,
                                 'bbox' : bbox}, nan_policy='omit')
     result = minner.minimize(params=params, method=method, max_nfev=None)
@@ -296,7 +472,7 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
         params['y0'].set(value=result_values['y0'], vary=False)
         params['x0'].set(value=result_values['x0'], vary=False)
         params['theta'].set(vary=True)
-        theta_minner = Minimizer(fit_error, params, fcn_args=(srcY, srcX, ncols, nrows),
+        theta_minner = Minimizer(fit_error, params, fcn_args=(src_y, src_x, ncols, nrows),
                        fcn_kws={'normalized_shifts' : normalized_shifts,
                                 'bbox' : bbox}, nan_policy='omit')
         theta_result = theta_minner.minimize(params=params, method=method, max_nfev=None)
@@ -310,7 +486,6 @@ def grid_fit(srcY, srcX, ncols, nrows, vary_theta=False,
     
     return grid, result
 
-
 def minimum_bounding_rectangle(points):
     """
     Find the smallest bounding rectangle for a set of points.
@@ -321,7 +496,6 @@ def minimum_bounding_rectangle(points):
     
     Used to calculate initial guess for grid center.
     """
-
     # Get the convex hull for the points
     simplicies = points[ConvexHull(points).vertices]
 
@@ -376,7 +550,6 @@ def minimum_bounding_rectangle(points):
 def find_midpoint_guess(Y, X, xstep, ystep, theta):
     """Calculate an initial midpoint guess. Works for side, corner, 
        and full grid exposure"""
-    
     # Get the star positions
     points = [[x,y] for x,y in zip(X,Y)]
     points_centroid = np.mean(points, axis=0)
@@ -421,8 +594,8 @@ def find_midpoint_guess(Y, X, xstep, ystep, theta):
 def fit_check(srcX, srcY, gX, gY):
     """Returns the X & Y residuals of the fit, number of identified stars, 
        number of missing stars (ideal grid points without corresponding stars),
-       and the X/Y coordinates of outliers (<5th and >95th percentile)."""
-
+       and the X/Y coordinates of outliers (<5th and >95th percentile).
+    """
     residualsX = []
     residualsY = []
     identified_points = [[x,y] for x,y in zip(srcX, srcY)]

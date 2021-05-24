@@ -58,6 +58,11 @@ class CharacterizeSpotsConfig(pipeBase.PipelineTaskConfig,
         default=10,
         doc="Value to grow detected footprints"
     )
+    maximumFilterBoxWidth = pexConfig.Field(
+       dtype=int,
+       default=50,
+       doc="Width of footprint box used in maximum filter."
+    )
     measurement = pexConfig.ConfigurableField(
         target=SingleFrameMeasurementTask,
         doc="Measure sources"
@@ -151,7 +156,7 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
         table = SourceTable.make(self.schema, sourceIdFactory)
         table.setMetadata(self.algMetadata)
 
-        filtered = maximum_filter(exposure.getImage().array, footprint=np.ones((50, 50)))
+        filtered = maximum_filter(exposure.getImage().array, size=self.config.maximumFilterBoxWidth)
         detected = (filtered == exposure.getImage().getArray()) & (filtered > self.config.thresholdValue)
 
         detectedImage = afwImage.ImageF(detected.astype(np.float32))
