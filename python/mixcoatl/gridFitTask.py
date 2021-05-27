@@ -89,12 +89,12 @@ class GridFitConfig(pipeBase.PipelineTaskConfig,
     )
     neighborDistanceLowerBound = Field(
         dtype=float,
-        default=40.,
+        default=50.,
         doc="Lower bound on distance to nearest source neighbor; used for masking."
     )
     neighborDistanceUpperBound = Field(
         dtype=float,
-        default=100.,
+        default=75.,
         doc="Upper bound on distance to nearest source neighbor; used for masking."
     )
 
@@ -116,10 +116,9 @@ class GridFitTask(pipeBase.PipelineTask):
 
         ## Mask sources by distance to neighbors
         indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
-        outlier_mask = (distances[:,1] < self.config.neighborDistanceUpperBound) \
-                     * (distances[:,1] > self.config.neighborDistanceLowerBound) \
-                     * (distances[:,2] < self.config.neighborDistanceUpperBound) \
-                     * (distances[:,2] > self.config.neighborDistanceLowerBound)
+        neighbor_check = (distances < self.config.neighborDistanceUpperBound) & \
+                         (distances > self.config.neighborDistanceLowerBound)
+        outlier_mask = np.sum(neighbor_check[:,1:], axis=1) >= 2
 
         mask = quality_mask & outlier_mask
         srcY = all_srcY[mask]
