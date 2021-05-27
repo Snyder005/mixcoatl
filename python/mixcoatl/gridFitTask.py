@@ -4,6 +4,7 @@ To Do:
 """
 import numpy as np
 from scipy.spatial import distance
+import copy
 
 import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
@@ -79,7 +80,7 @@ class GridFitConfig(pipeBase.PipelineTaskConfig,
     )
     shapeLowerBound = Field(
         dtype=float,
-        default=0.1,
+        default=2.0,
         doc="Lower bound on source second moment; used for masking."
     )
     shapeUpperBound = Field(
@@ -89,12 +90,12 @@ class GridFitConfig(pipeBase.PipelineTaskConfig,
     )
     neighborDistanceLowerBound = Field(
         dtype=float,
-        default=50.,
+        default=60.,
         doc="Lower bound on distance to nearest source neighbor; used for masking."
     )
     neighborDistanceUpperBound = Field(
         dtype=float,
-        default=75.,
+        default=70.,
         doc="Upper bound on distance to nearest source neighbor; used for masking."
     )
 
@@ -182,7 +183,7 @@ class GridFitTask(pipeBase.PipelineTask):
         outputCat[gridIndexCol][:] = all_gridIndex
         
         ## Add grid parameters to metadata
-        md = inputCat.getMetadata()
+        md = copy.deepcopy(inputCat.getMetadata())
         md.add('GRID_X0', grid.x0)
         md.add('GRID_Y0', grid.y0)
         md.add('GRID_THETA', grid.theta)
