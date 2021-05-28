@@ -28,6 +28,10 @@ class DistortedGrid:
         Number of pixels between columns of the grid.
     theta : `float`
         Rotation of the grid in radians from the coordinate axes.
+    y0 : `float`
+        Y-axis coordinate of grid center.
+    x0 : `float`
+        X-axis coordinate of grid center.
     ncols : `int`, optional
         Number of grid columns (the default is 49).
     nrows : `int`, optional
@@ -40,18 +44,18 @@ class DistortedGrid:
     def __init__(self, ystep, xstep, theta, y0, x0, ncols=49, nrows=49, normalized_shifts=None):
 
         ## Ideal grid parameters
-        self.nrows = nrows
-        self.ncols = ncols
         self.ystep = ystep
         self.xstep = xstep
         self.theta = theta
         self.y0 = y0
         self.x0 = x0
+        self.nrows = nrows
+        self.ncols = ncols
 
+        ## Add centroid shifts
         self._norm_dy = np.zeros(nrows*ncols)
         self._norm_dx = np.zeros(nrows*ncols)
 
-        ## Add centroid shifts
         if normalized_shifts is not None:
             norm_dy, norm_dx = normalized_shifts
             self.set_normalized_shifts(norm_dy, norm_dx)
