@@ -3,16 +3,61 @@
 This module contains a number of function and class definitions that are used
 for performing the measurement of electronic crosstalk in multi-segmented CCD
 images.
+
+To Do:
+    * Modify find_bright_columns to take DM objects as input parameters.
 """
 import copy
 import numpy as np
 from astropy.io import fits
 
-import lsst.afw.image afwImage
+import lsst.afw.image as afwImage
 from lsst.afw.detection import FootprintSet, Threshold
 
+def calculate_covariance(exposure, amp1, amp2):
+    """Calculate read noise covariance between amplifiers.
+
+    Parameters
+    ----------
+    exposure : `lsst.afw.image.Exposure`
+        Exposure from which to measure read noise covariance.
+    amp1 : `lsst.afw.cameraGeom.Amplifier`
+        First amplifier to use in covariance calculation.
+    amp2 : `lsst.afw.cameraGeom.Amplifier`
+        Second amplifier to use in covariance calculation.
+
+    Returns
+    -------
+    cov : `numpy.ndarray`, (2, 2)
+        A 2-d array representing the covariance matrix.
+    """
+    ccd = exposure.getDetector()
+
+    oscanImage1 = exposure.maskedImage[amp1.getRawHorizontalOverscanBBox()]
+    oscanImage2 = exposure.maskedImage[amp2.getRawHorizontalOverscanBBox()]
+
+    arr1 = oscanImage1.getImage().getArray().flatten()
+    arr2 = oscanImage2.getImage().getArray().flatten()
+
+    cov = np.cov(np.vstack([arr1, arr2]))
+
+    return cov
+
 def find_bright_columns(imarr, threshold):
+    """Find bright columns in an image array.
     
+    Parameters
+    ----------
+    imarr : `numpy.ndarrawy`, (Nx, Ny)
+        An array representing an image to analyze.
+    threshold : `float`
+        Pixel value threshold defining a bright column.
+
+    Returns
+    -------
+    bright_cols : `list`
+        List of column indices corresponding to bright columns.
+    """
     image = afwImage.ImageF(imarr)
     
     fp_set = FootprintSet(image, Threshold(threshold))    
@@ -37,10 +82,19 @@ def find_bright_columns(imarr, threshold):
     return bright_cols
 
 def bad_column(column_indices, threshold):
-    """
-    Count the sizes of contiguous sequences of masked pixels and
-    return True if the length of any sequence exceeds the threshold
-    number.
+    """Identify bad columns by number of masked pixels.
+    
+    Parameters
+    ----------
+    column_indices : `list`
+        List of column indices.
+    threshold : `int`
+        Number of bad pixels required to mark the column as bad.
+
+    Returns
+    -------
+    is_bad_column : `bool`
+        `True` if column is bad, `False` if not.
     """
     if len(column_indices) < threshold:
         # There are not enough masked pixels to mark this as a bad

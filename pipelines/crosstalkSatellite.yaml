@@ -1,0 +1,33 @@
+description: mixcoatl CROSSTALK measurement
+tasks:
+  isr:
+    class: lsst.ip.isr.isrTask.IsrTask
+    config:
+      connections.ccdExposure: 'raw'
+      connections.bias: 'bias'
+      connections.outputExposure: 'cpCrosstalkProc'
+      doBias: True
+      doVariance: True
+      doLinearize: False
+      doCrosstalk: False
+      doDefect: False
+      doNanMasking: True
+      doInterpolate: True
+      doBrighterFatter: False
+      doDark: False
+      doFlat: False
+      doApplyGains: False
+      doFringe: False
+      doOverscan: True
+      overscan.fitType: 'MEDIAN_PER_ROW'
+  crosstalkSatellite:
+    class: mixcoatl.crosstalkDMTask.CrosstalkSatelliteTask
+    config:
+      connections.inputExp: 'cpCrosstalkProc'
+      connections.rawExp: 'raw'
+      connections.outputRatios: 'crosstalkRatios'
+      connections.outputFluxes: 'crosstalkFluxes'
+      connections.outputZOffsets: 'crosstalkBackgroundZOffsets'
+      connections.outputYTilts: 'crosstalkBackgroundYTilts'
+      connections.outputXTilts: 'crosstalkBackgroundXTilts'
+      correctNoiseCovariance: True

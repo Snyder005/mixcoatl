@@ -2,7 +2,8 @@
 
 To Do: 
     1. Determine method to restrict satellite crosstalk measurement to single side of sensor.
-    2. Clean up pipetask connection for rawExp.
+    2. Clean up pipetask connection for rawExp. Use a Prequisite input, but not calibration.
+    3. Encorporate bad/saturated pixel masking.
 """
 import numpy as np
 import copy
@@ -189,7 +190,9 @@ class CrosstalkColumnTask(pipeBase.PipelineTask,
                 if self.config.correctNoiseCovariance:
                     covariance = mixCrosstalk.calculate_covariance(rawExp, sourceAmp, targetAmp)
                 else:
-                    covariance = np.asarray([[7.0, 0.0], [0.0, 7.0]])
+                    noise = np.asarray([[sourceAmp.getReadNoise()/sourceAmp.getGain(), 0.],
+                                        [0., targetAmp.getReadNoise()/targetAmp.getGain()]])
+                    covariance = np.square(noise)
 
                 targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
                                                            targetAmp, sourceAmp,
@@ -292,7 +295,7 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
     )
     maskWidth = Field(
         dtype=int,
-        default=50,
+        default=40,
         doc="One-sided width of satellite streak mask."
     )
     cannySigma = Field(
@@ -402,7 +405,9 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                 if self.config.correctNoiseCovariance:
                     covariance = mixCrosstalk.calculate_covariance(rawExp, sourceAmp, targetAmp)
                 else:
-                    covariance = np.asarray([[7.0, 0.0], [0.0, 7.0]])
+                    noise = np.asarray([[sourceAmp.getReadNoise()/sourceAmp.getGain(), 0.],
+                                        [0., targetAmp.getReadNoise()/targetAmp.getGain()]])
+                    covariance = np.square(noise)
 
                 targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
                                                            targetAmp, sourceAmp,
