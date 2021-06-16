@@ -377,8 +377,8 @@ def fit_error(params, src_y, src_x, ncols, nrows, normalized_shifts=None, bbox=N
 
     return nn_distances
 
-def grid_fit(src_y, src_x, ncols, nrows, vary_theta=False, 
-             method='least_squares', normalized_shifts=None, bbox=None):
+def grid_fit(src_y, src_x, ncols, nrows, params, vary_theta=False, method='least_squares', bbox=None,
+             normalized_shifts=None):
     """Optimize grid model parameters to match detected source centroids.
 
     Parameters
@@ -391,19 +391,21 @@ def grid_fit(src_y, src_x, ncols, nrows, vary_theta=False,
         Number of grid columns.
     nrows : `int`
         Number of grid rows.
+    params: `list` or `tuple`
+        Sequence of initial guesses for the grid model parameters.
     vary_theta : `bool`, optional
         Allow the grid rotation angle parameter to vary during model fit if
         `True`.
     method : `str`, optional
         Name of the fitting method to use (the default is 'least_squares').
-    normalized_shifts : `tuple` [`numpy.ndarray`], optional
-        A sequence of arrays of normalized shifts in Y-axis and X-axis (the
-        default is `None`, which implies no normalized shifts to be included).
     bbox : `lsst.geom.Box2I`, optional
         An integer coordinate rectangle corresponding to detector geometry
         (the default is `None`, which implies no detector geometry information
         will be used).
-
+    normalized_shifts : `tuple` [`numpy.ndarray`], optional
+        A sequence of arrays of normalized shifts in Y-axis and X-axis (the
+        default is `None`, which implies no normalized shifts to be included).
+ 
     Returns
     -------
     grid : `mixcoatl.sourcegrid.DistortedGrid`
@@ -411,64 +413,19 @@ def grid_fit(src_y, src_x, ncols, nrows, vary_theta=False,
     result : `lmfit.minimizer.MinimizerResult`
         The results of the grid model optimization.
     """
-    ## Calculate mean xstep/ystep
-    nsources = src_y.shape[0]
-    indices, distances = coordinate_distances(src_y, src_x, src_y, src_x)
-    nn_indices = indices[:, 1:5]
-    nn_distances = distances[:, 1:5]
-    med_dist = np.median(nn_distances)
+    ystep, xstep, theta, y0, x0 = params
 
-    dist1_array = np.full(nsources, np.nan)
-    dist2_array = np.full(nsources, np.nan)
-    theta_array = np.full(nsources, np.nan)
-
-    for i in range(nsources):
-
-        yc = src_y[i]
-        xc = src_x[i]
-
-        for j in range(4):
-
-            nn_dist = nn_distances[i, j]
-            if np.abs(nn_dist - med_dist) > 10.: continue
-            y_nn = src_y[nn_indices[i, j]]
-            x_nn = src_x[nn_indices[i, j]]
-
-            if x_nn > xc:
-                if y_nn > yc:
-                    dist1_array[i] = nn_dist
-                    theta_array[i] = np.arctan((y_nn-yc)/(x_nn-xc))
-                else:
-                    dist2_array[i] = nn_dist
-
-    ## Use theta to determine x/y step direction
-    theta = np.nanmedian(theta_array)
-    if theta >= np.pi/4.:
-        theta = theta - (np.pi/2.)
-        xstep = np.nanmedian(dist2_array)
-        ystep = np.nanmedian(dist1_array)
-    else:
-        xstep = np.nanmedian(dist1_array)
-        ystep = np.nanmedian(dist2_array)
-
-    ## Find initial guess for grid center based on orientation
-    grid_center_guess = find_midpoint_guess(src_y, src_x, xstep, ystep, theta)
-    y0_guess, x0_guess = grid_center_guess[1], grid_center_guess[0]    
-    
     ## Define fit parameters
     params = Parameters()
     params.add('ystep', value=ystep, vary=False)
     params.add('xstep', value=xstep, vary=False)
-    params.add('y0', value=y0_guess, min=y0_guess-3., max=y0_guess+3., vary=True)
-    params.add('x0', value=x0_guess, min=x0_guess-3., max=x0_guess+3., vary=True)
-    params.add('theta', value=theta, min=theta-0.5*np.pi/180., max=theta+0.5*np.pi/180., vary=False)
+    params.add('y0', value=y0, min=y0 - 3., max=y0 + 3., vary=True)
+    params.add('x0', value=x0, min=x0 - 3., max=x0 + 3., vary=True)
+    params.add('theta', value=theta, min=theta - 0.5*np.pi/180., max=theta + 0.5*np.pi/180., vary=False)
     
     minner = Minimizer(fit_error, params, fcn_args=(src_y, src_x, ncols, nrows),
-                       fcn_kws={'normalized_shifts' : normalized_shifts,
-                                'bbox' : bbox}, nan_policy='omit')
+                       fcn_kws={'normalized_shifts' : normalized_shifts, 'bbox' : bbox}, nan_policy='omit')
     result = minner.minimize(params=params, method=method, max_nfev=None)
-    x0result = result.params['x0']
-    y0result = result.params['y0']
 
     if vary_theta:
         result_params = result.params
@@ -477,16 +434,14 @@ def grid_fit(src_y, src_x, ncols, nrows, vary_theta=False,
         params['x0'].set(value=result_values['x0'], vary=False)
         params['theta'].set(vary=True)
         theta_minner = Minimizer(fit_error, params, fcn_args=(src_y, src_x, ncols, nrows),
-                       fcn_kws={'normalized_shifts' : normalized_shifts,
-                                'bbox' : bbox}, nan_policy='omit')
+                                 fcn_kws={'normalized_shifts' : normalized_shifts, 'bbox' : bbox}, 
+                                 nan_policy='omit')
         theta_result = theta_minner.minimize(params=params, method=method, max_nfev=None)
         result.params['theta'] = theta_result.params['theta']
         
     parvals = result.params.valuesdict()
-    grid = DistortedGrid(parvals['ystep'], parvals['xstep'], 
-                         parvals['theta'], parvals['y0'], 
-                         parvals['x0'], ncols, nrows, 
-                         normalized_shifts=normalized_shifts)
+    grid = DistortedGrid(parvals['ystep'], parvals['xstep'], parvals['theta'], parvals['y0'], parvals['x0'], 
+                         ncols, nrows, normalized_shifts=normalized_shifts)
     
     return grid, result
 

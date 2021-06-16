@@ -12,7 +12,7 @@ import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
 from lsst.pex.config import Field
 
-from .sourcegrid import DistortedGrid, grid_fit, coordinate_distances
+from .sourcegrid import DistortedGrid, grid_fit, coordinate_distances, find_midpoint_guess
 
 class GridFitConnections(pipeBase.PipelineTaskConnections, 
                          dimensions=("instrument", "exposure", "detector")):
@@ -85,13 +85,13 @@ class GridFitConfig(pipeBase.PipelineTaskConfig,
     )
     shapeUpperBound = Field(
         dtype=float,
-        default=50.,
+        default=20.,
         doc="Upper bound on source second moment; used for masking."
     )
-    neighborDistanceVariation = Field(
+    distanceFromVertex = Field(
         dtype=float,
         default=5.,
-        doc="Allowable variation of distance to nearest source neighbor; used for masking."
+        doc="Allowable distance of each source from a possible grid vertex."
     )
 
 class GridFitTask(pipeBase.PipelineTask):
@@ -100,36 +100,37 @@ class GridFitTask(pipeBase.PipelineTask):
     _DefaultName = "GridFitTask" 
 
     def run(self, inputCat, bbox, gridCalibTable=None):
-        
+
+        all_srcY = inputCat['slot_Centroid_y']
+        all_srcX = inputCat['slot_Centroid_x']
+
         ## Mask sources by shape
         select_by_shape = (inputCat['slot_Shape_xx'] > self.config.shapeLowerBound) \
                         * (inputCat['slot_Shape_xx'] < self.config.shapeUpperBound) \
                         * (inputCat['slot_Shape_yy'] > self.config.shapeLowerBound) \
                         * (inputCat['slot_Shape_yy'] < self.config.shapeUpperBound)
 
-        all_srcY = inputCat['slot_Centroid_y'][select_by_shape]
-        all_srcX = inputCat['slot_Centroid_x'][select_by_shape]
-
         ## Estimate grid properties
         indices, distances = coordinate_distances(all_srcY, all_srcX, all_srcY, all_srcX)
-        nn_indices = indices[:, 1:5]
-        nn_distances = distances[:, 1:5]
+        nn_indices = indices[select_by_shape, 1:5]
+        nn_distances = distances[select_by_shape, 1:5]
         med_distance = np.median(nn_distances)
 
-        nsources = all_srcY.shape[0]
+        nsources = all_srcY[select_by_shape].shape[0]
         dist1_array = np.full(nsources, np.nan)
         dist2_array = np.full(nsources, np.nan)
         theta_array = np.full(nsources, np.nan)
 
         for i in range(nsources):
 
-            yc = all_srcY[i]
-            xc = all_srcX[i]
+            yc = all_srcY[select_by_shape][i]
+            xc = all_srcX[select_by_shape][i]
 
             for j in range(4):
 
                 nn_dist = nn_distances[i, j]
-                if np.abs(nn_dist - med_distance) > self.config.neighborDistanceVariation: continue
+                if np.abs(nn_dist - med_distance) > 5.: 
+                    continue
                 y_nn = all_srcY[nn_indices[i, j]]
                 x_nn = all_srcX[nn_indices[i, j]]
 
@@ -149,7 +150,7 @@ class GridFitTask(pipeBase.PipelineTask):
         else:
             xstep = np.nanmedian(dist1_array)
             ystep = np.nanmedian(dist2_array)
-            
+
         ## Rotate to pixel x/y
         R = np.array([[np.cos(-theta), -np.sin(-theta)], [np.sin(-theta), np.cos(-theta)]])
         points = (R @ np.vstack([all_srcX,all_srcY]))
@@ -157,18 +158,24 @@ class GridFitTask(pipeBase.PipelineTask):
         ys = points[1]
 
         ## Mask by distance to possible grid vertex
-        mask = np.zeros(len(all_srcX), bool)
+        select_by_distance = np.zeros(len(all_srcX), bool)
         for i,pt in enumerate(points.T):
             xs = np.delete(points[0], i)
             ys = np.delete(points[1], i)
-            if np.any(xs, where=np.isclose(pt[0],xs, rtol=0, atol=self.config.neighborDistanceVariation)) and \
-               np.any(ys, where=np.isclose(pt[1],ys, rtol=0, atol=self.config.neighborDistanceVariation)):
-                mask[i] = True
+            if np.any(xs, where=np.isclose(pt[0],xs, rtol=0, atol=self.config.distanceFromVertex)) and \
+               np.any(ys, where=np.isclose(pt[1],ys, rtol=0, atol=self.config.distanceFromVertex)):
+                select_by_distance[i] = True
             else:
-                mask[i] = False
+                select_by_distance[i] = False
                 
-        srcY = all_srcY[mask]
-        srcX = all_srcX[mask]
+        select = select_by_shape*select_by_distance
+
+        srcY = all_srcY[select]
+        srcX = all_srcX[select]
+
+        ## Calculate intial guess for grid center
+        grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta)
+        y0, x0 = grid_center_guess[1], grid_center_guess[0]
        
         ## Optionally use normalized centroid shifts from calibration
         if gridCalibTable is not None:
@@ -178,8 +185,10 @@ class GridFitTask(pipeBase.PipelineTask):
             normalized_shifts = None
             
         ## Perform grid fit
-        grid, result = self.performGridFit(srcY, srcX, ystep, xstep, theta, bbox=bbox,
-                                           normalized_shifts=normalized_shifts)
+        params = (ystep, xstep, theta, y0, x0)
+        grid, result = grid_fit(srcY, srcX, self.config.numColumns, self.config.numRows, params, bbox=bbox,
+                                vary_theta=self.config.varyTheta, method=self.config.fitMethod,
+                                normalized_shifts=normalized_shifts)
 
         ## Construct source catalog with new columns
         schema = inputCat.getSchema()
@@ -211,9 +220,9 @@ class GridFitTask(pipeBase.PipelineTask):
         all_normDX = np.full(numSrcs, np.nan)
         all_gridIndex = np.full(numSrcs, np.nan)
 
-        all_gridY[mask] = gridY[match_indices[:, 0]]
-        all_gridX[mask] = gridX[match_indices[:, 0]]
-        all_gridIndex[mask] = match_indices[:, 0] 
+        all_gridY[select] = gridY[match_indices[:, 0]]
+        all_gridX[select] = gridX[match_indices[:, 0]]
+        all_gridIndex[select] = match_indices[:, 0] 
         dy = all_srcY - all_gridY
         dx = all_srcX - all_gridX
         all_normDY = (np.sin(-grid.theta)*dx + np.cos(-grid.theta)*dy)/grid.ystep
@@ -238,47 +247,3 @@ class GridFitTask(pipeBase.PipelineTask):
         outputCat.setMetadata(md)
 
         return pipeBase.Struct(gridSourceCat=outputCat)
-
-    def performGridFit(self, src_y, src_x, ystep, xstep, theta, normalized_shifts=None, bbox=None):
-
-        ncols = self.config.numCols
-        nrows = self.config.numRows
-
-        ## Find initial guess for grid center based on orientation
-        grid_center_guess = mixCrosstalk.find_midpoint_guess(src_y, src_x, xstep, ystep, theta)
-        y0_guess, x0_guess = grid_center_guess[1], grid_center_guess[0]
-
-        ## Define fit parameters
-        params = Parameters()
-        params.add('ystep', value=ystep, vary=False)
-        params.add('xstep', value=xstep, vary=False)
-        params.add('y0', value=y0_guess, min=y0_guess-3., max=y0_guess+3., vary=True)
-        params.add('x0', value=x0_guess, min=x0_guess-3., max=x0_guess+3., vary=True)
-        params.add('theta', value=theta, min=theta-0.5*np.pi/180., max=theta+0.5*np.pi/180., vary=False)
-
-        minner = Minimizer(mixCrosstalk.fit_error, params, fcn_args=(src_y, src_x, ncols, nrows),
-                           fcn_kws={'normalized_shifts' : normalized_shifts,
-                                    'bbox' : bbox}, nan_policy='omit')
-        result = minner.minimize(params=params, method=self.config.fitMethod, max_nfev=None)
-        x0result = result.params['x0']
-        y0result = result.params['y0']
-
-        if self.config.varyTheta:
-            result_params = result.params
-            result_values = result_params.valuesdict()
-            params['y0'].set(value=result_values['y0'], vary=False)
-            params['x0'].set(value=result_values['x0'], vary=False)
-            params['theta'].set(vary=True)
-            theta_minner = Minimizer(fit_error, params, fcn_args=(src_y, src_x, ncols, nrows),
-                           fcn_kws={'normalized_shifts' : normalized_shifts,
-                                    'bbox' : bbox}, nan_policy='omit')
-            theta_result = theta_minner.minimize(params=params, method=self.config.fitMethod, max_nfev=None)
-            result.params['theta'] = theta_result.params['theta']
-
-        parvals = result.params.valuesdict()
-        grid = mixCrosstalk.DistortedGrid(parvals['ystep'], parvals['xstep'], 
-                                          parvals['theta'], parvals['y0'], 
-                                          parvals['x0'], ncols, nrows, 
-                                          normalized_shifts=normalized_shifts)
-        
-        return grid, result
