@@ -1,0 +1,32 @@
+description: cp_pipe BIAS calibration construction
+tasks:
+  isr:
+    class: lsst.ip.isr.isrTask.IsrTask
+    config:
+      connections.ccdExposure: 'raw'
+      connections.outputExposure: 'cpBiasProc'
+      doBias: False
+      doVariance: True
+      doLinearize: False
+      doCrosstalk: False
+      doDefect: False
+      doNanMasking: True
+      doInterpolate: True
+      doBrighterFatter: False
+      doDark: False
+      doFlat: False
+      doApplyGains: False
+      doFringe: False
+      doOverscan: True
+      overscan.fitType: 'MEDIAN_PER_ROW'
+  cpCombine:
+    class: lsst.cp.pipe.cpCombine.CalibCombineTask
+    config:
+      connections.inputExps: 'cpBiasProc'
+      connections.outputData: 'bias'
+      calibrationType: 'bias'
+      exposureScaling: "Unity"
+contracts:
+  - isr.doBias == False
+  - cpCombine.calibrationType == "bias"
+  - cpCombine.exposureScaling == "Unity"

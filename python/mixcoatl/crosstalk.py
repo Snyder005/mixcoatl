@@ -3,12 +3,118 @@
 This module contains a number of function and class definitions that are used
 for performing the measurement of electronic crosstalk in multi-segmented CCD
 images.
+
+To Do:
+    * Modify find_bright_columns to take DM objects as input parameters.
 """
 import copy
 import numpy as np
 from astropy.io import fits
 
-from lsst.eotest.fitsTools import fitsWriteto
+import lsst.afw.image as afwImage
+from lsst.afw.detection import FootprintSet, Threshold
+
+def calculate_covariance(exposure, amp1, amp2):
+    """Calculate read noise covariance between amplifiers.
+
+    Parameters
+    ----------
+    exposure : `lsst.afw.image.Exposure`
+        Exposure from which to measure read noise covariance.
+    amp1 : `lsst.afw.cameraGeom.Amplifier`
+        First amplifier to use in covariance calculation.
+    amp2 : `lsst.afw.cameraGeom.Amplifier`
+        Second amplifier to use in covariance calculation.
+
+    Returns
+    -------
+    cov : `numpy.ndarray`, (2, 2)
+        A 2-d array representing the covariance matrix.
+    """
+    ccd = exposure.getDetector()
+
+    oscanImage1 = exposure.maskedImage[amp1.getRawHorizontalOverscanBBox()]
+    oscanImage2 = exposure.maskedImage[amp2.getRawHorizontalOverscanBBox()]
+
+    arr1 = oscanImage1.getImage().getArray().flatten()
+    arr2 = oscanImage2.getImage().getArray().flatten()
+
+    cov = np.cov(np.vstack([arr1, arr2]))
+
+    return cov
+
+def find_bright_columns(imarr, threshold):
+    """Find bright columns in an image array.
+    
+    Parameters
+    ----------
+    imarr : `numpy.ndarrawy`, (Nx, Ny)
+        An array representing an image to analyze.
+    threshold : `float`
+        Pixel value threshold defining a bright column.
+
+    Returns
+    -------
+    bright_cols : `list`
+        List of column indices corresponding to bright columns.
+    """
+    image = afwImage.ImageF(imarr)
+    
+    fp_set = FootprintSet(image, Threshold(threshold))    
+    columns = dict([(x, []) for x in range(0, image.getWidth())])
+    for footprint in fp_set.getFootprints():
+        for span in footprint.getSpans():
+            y = span.getY()
+            for x in range(span.getX0(), span.getX1()+1):
+                columns[x].append(y)
+                
+    bright_cols = []
+    x0 = image.getX0()
+    y0 = image.getY0()
+    for x in columns:
+        if bad_column(columns[x], 20):
+            bright_cols.append(x - x0)
+    #
+    # Sort the output.
+    #
+    bright_cols.sort()
+    
+    return bright_cols
+
+def bad_column(column_indices, threshold):
+    """Identify bad columns by number of masked pixels.
+    
+    Parameters
+    ----------
+    column_indices : `list`
+        List of column indices.
+    threshold : `int`
+        Number of bad pixels required to mark the column as bad.
+
+    Returns
+    -------
+    is_bad_column : `bool`
+        `True` if column is bad, `False` if not.
+    """
+    if len(column_indices) < threshold:
+        # There are not enough masked pixels to mark this as a bad
+        # column.
+        return False
+    # Fill an array with zeros, then fill with ones at mask locations.
+    column = np.zeros(max(column_indices) + 1)
+    column[(column_indices,)] = 1
+    # Count pixels in contiguous masked sequences.
+    masked_pixel_count = []
+    last = 0
+    for value in column:
+        if value != 0 and last == 0:
+            masked_pixel_count.append(1)
+        elif value != 0 and last != 0:
+            masked_pixel_count[-1] += 1
+        last = value
+    if len(masked_pixel_count) > 0 and max(masked_pixel_count) >= threshold:
+        return True
+    return False
 
 def rectangular_mask(imarr, y_center, x_center, lx, ly):
     """Make a rectangular pixel mask.
@@ -188,112 +294,3 @@ def crosstalk_fit(aggressor_array, victim_array, select, covariance,
     results = np.concatenate((params, np.sqrt(covar.diagonal()), res, [dof]))
     
     return results
-
-class CrosstalkMatrix():
-
-    keys = ['XTALK', 'OFFSET_Z', 'TILT_Y', 'TILT_X',
-            'SIGMA_XTALK', 'SIGMA_Z', 'SIGMA_Y', 'SIGMA_X',
-            'RESIDUAL', 'DOF']
-
-    def __init__(self, aggressor_id, signal=100000., matrix=None, victim_id=None, namps=16):
-
-        ## Set sensor IDs
-        self.aggressor_id = aggressor_id
-        if victim_id is not None:
-            self.victim_id = victim_id
-        else:
-            self.victim_id = aggressor_id
-        self.namps = namps
-        self.signal = signal
-
-        ## Set crosstalk results
-        self._matrix = np.full((10, self.namps, self.namps), np.nan)
-        if matrix is not None:
-            self._matrix = matrix
-
-    @classmethod
-    def from_fits(cls, infile):
-        """Initialize CrosstalkMatrix from a FITS file."""
-
-        with fits.open(infile) as hdulist:
-
-            aggressor_id = hdulist[0].header['AGGRESSOR']
-            victim_id = hdulist[0].header['VICTIM']
-            namps = hdulist[0].header['NAMPS']
-            signal = hdulist[0].header['SIGNAL']
-
-            matrix = np.full((10, namps, namps), np.nan)
-            for i, key in enumerate(cls.keys):
-                matrix[i, :, :] = hdulist[key].data
-
-        return cls(aggressor_id, signal=signal, matrix=matrix, victim_id=victim_id, namps=16)
-
-    @property
-    def matrix(self):
-        return self._matrix
-
-    def set_row(self, aggressor_amp, row_results):
-        """Set matrix row from results dictionary."""
-
-        for victim_amp in row_results.keys():
-            self._matrix[:, aggressor_amp-1, victim_amp-1] = row_results[victim_amp]
-
-    def set_diagonal(self, value):
-        """Set diagonal of matrices to value (e.g. 0.0 or NaN)."""
-        
-        for i in range(10):
-            np.fill_diagonal(self._matrix[i, :, :], value)
-
-    def write_fits(self, outfile, *kwargs):
-        """Write crosstalk results to FITS file."""
-
-        ## Make primary HDU
-        hdr = fits.Header()
-        hdr['AGGRESSOR'] = self.aggressor_id
-        hdr['VICTIM'] = self.victim_id
-        hdr['NAMPS'] = self.namps
-        hdr['SIGNAL'] = self.signal
-        prihdu = fits.PrimaryHDU(header=hdr)
-
-        xtalk_hdu = fits.ImageHDU(self._matrix[0,:,:], name='XTALK')
-        offsetz_hdu = fits.ImageHDU(self._matrix[1,:,:], name='OFFSET_Z')
-        tilty_hdu = fits.ImageHDU(self._matrix[2,:,:], name='TILT_Y')
-        tiltx_hdu = fits.ImageHDU(self._matrix[3,:,:], name='TILT_X')
-        xtalkerr_hdu = fits.ImageHDU(self._matrix[4,:,:], name='SIGMA_XTALK')
-        zerr_hdu = fits.ImageHDU(self._matrix[5,:,:], name='SIGMA_Z')
-        yerr_hdu = fits.ImageHDU(self._matrix[6,:,:], name='SIGMA_Y')
-        xerr_hdu = fits.ImageHDU(self._matrix[7,:,:], name='SIGMA_X')
-        chisq_hdu = fits.ImageHDU(self._matrix[8,:,:], name='RESIDUAL')
-        dof_hdu = fits.ImageHDU(self._matrix[9,:,:], name='DOF')
-        
-        hdulist = fits.HDUList([prihdu, xtalk_hdu, offsetz_hdu, tilty_hdu, 
-                                tiltx_hdu, xtalkerr_hdu, zerr_hdu, yerr_hdu, 
-                                xerr_hdu, chisq_hdu, dof_hdu])
-
-        hdulist.writeto(outfile, **kwargs)
-
-    def write_yaml(self, outfile):
-        """Write crosstalk coefficients to a YAML file."""
-
-        ampNames = [str(i) for i in range(self.matrix.shape[1])]
-        assert self.matrix.shape == (10, len(ampNames), len(ampNames))
-
-        dIndent = indent
-        indent = 0
-        with open(outfile, "w") as fd:
-            print(indent*" " + "crosstalk :", file=fd)
-            indent += dIndent
-            print(indent*" " + "%s :" % crosstalkName, file=fd)
-            indent += dIndent
-
-            for i, ampNameI in enumerate(ampNames):
-                print(indent*" " + "%s : {" % ampNameI, file=fd)
-                indent += dIndent
-                print(indent*" ", file=fd, end='')
-
-                for j, ampNameJ in enumerate(ampNames):
-                    print("%s : %11.4e, " % (ampNameJ, coeff[i, j]), file=fd,
-                          end='\n' + indent*" " if j%4 == 3 else '')
-                print("}", file=fd)
-
-                indent -= dIndent

@@ -41,16 +41,10 @@ class CharacterizeSpotsConnections(pipeBase.PipelineTaskConnections,
 
 class CharacterizeSpotsConfig(pipeBase.PipelineTaskConfig,
                               pipelineConnections=CharacterizeSpotsConnections):
-
     """!Config for CharacterizeSpotsTask"""
-    doWrite = pexConfig.Field(
-        dtype=bool,
-        default=True,
-        doc="Persist results?",
-    )
     thresholdValue = pexConfig.Field(
         dtype=float,
-        default=300.0,
+        default=200.0,
         doc="Threshold applied to image value for footprints"
     )
     footprintGrowValue = pexConfig.Field(
@@ -169,7 +163,12 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
 
         self.measurement.run(measCat=sources, exposure=exposure, exposureId=exposureIdInfo.expId)
         self.catalogCalculation.run(sources)
-        
+
+        ## Add metadata to source catalog
+        md = exposure.getMetadata()
+        sources.getMetadata().add("BOTXCAM", md["BOTXCAM"])
+        sources.getMetadata().add("BOTYCAM", md["BOTYCAM"])
+
         self.display("measure", exposure=exposure, sourceCat=sources)
 
         return pipeBase.Struct(sourceCat=sources) 
