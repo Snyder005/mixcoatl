@@ -145,7 +145,8 @@ class GridCalibrationTask(pipeBase.PipelineTask):
                 'GRID_THETA' : np.nanmean(all_theta),
                 'GRID_NROWS' : self.config.numRows,
                 'GRID_NCOLS' : self.config.numCols}
-        outputTable = vstack(all_data_tables, join_type='exact').group_by('spotgrid_index')
+        outputTable = vstack(all_data_tables, join_type='exact', metadata_conflicts='silent')\
+                             .group_by('spotgrid_index')
         outputTable = outputTable[cols_to_aggregate].groups.aggregate(np.nanmean)
         outputTable.remove_rows(np.where(outputTable['spotgrid_index'] < 0)[0])
         outputTable.meta.update(meta)
