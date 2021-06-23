@@ -198,6 +198,7 @@ class DistortedGrid:
         table = Table(cols, meta=meta)
 
         return table
+
     def convert_normalized_shifts(self, norm_dy, norm_dx):
         """Convert normalized shifts to centroid shifts.
 
