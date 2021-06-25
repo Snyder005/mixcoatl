@@ -392,11 +392,11 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                                                  width=self.config.maskWidth)
             
             ## Calculate median signal of satellite
-            origin = (0, sourceAmpArray.shape[1]-1)
+            origin = np.array((0, sourceAmpArray.shape[1]-1))
             y0, y1 = (mean_dist - origin * np.cos(mean_angle)) / np.sin(mean_angle)
             x, y = np.linspace(origin[0], origin[1], 1000), np.linspace(y0, y1, 1000)
-            bounds = (y < sourceAmpArray.shape[0]-1)*(x < sourceAmpArray.shape[1]-1)
-            signals = sourceAmpArray[y[good].astype(int), x[good].astype(int)]
+            bounds = (y < sourceAmpArray.shape[0]-1)*(0 < y)
+            signals = sourceAmpArray[y[bounds].astype(int), x[bounds].astype(int)]
             signal = sigma_clipped_stats(signals, cenfunc='median', stdfunc=median_absolute_deviation)[1]
             self.log.debug("  Source amplifier: %s", sourceAmpName)
 
