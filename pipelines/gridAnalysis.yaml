@@ -1,0 +1,34 @@
+description: mixcoatl SPOT analysis
+tasks:
+  isr:
+    class: lsst.ip.isr.isrTask.IsrTask
+    config:
+      connections.ccdExposure: 'raw'
+      connections.bias: 'bias'
+      connections.outputExposure: 'postISRCCD'
+      doBias: True
+      doVariance: True
+      doLinearize: False
+      doCrosstalk: False
+      doDefect: False
+      doNanMasking: True
+      doInterpolate: True
+      doBrighterFatter: False
+      doDark: False
+      doFlat: False
+      doApplyGains: True
+      doFringe: False
+      doOverscan: True
+      overscan.fitType: 'MEDIAN_PER_ROW'
+  characterizeSpots:
+    class: mixcoatl.characterizeSpots.CharacterizeSpotsTask
+    config:
+      connections.exposure: 'postISRCCD'
+      connections.sourceCat: 'spotSrc'
+  gridFit:
+    class: mixcoatl.gridFitTask.GridFitTask
+    config:
+      connections.inputCat: 'spotSrc'
+      connections.bbox: 'postISRCCD.bbox'
+      connections.gridSourceCat: 'gridSpotSrc'
+      shapeUpperBound: 10.0

@@ -153,21 +153,22 @@ class GridFitTask(pipeBase.PipelineTask):
 
         ## Rotate to pixel x/y
         R = np.array([[np.cos(-theta), -np.sin(-theta)], [np.sin(-theta), np.cos(-theta)]])
-        points = (R @ np.vstack([all_srcX,all_srcY]))
-        xs = points[0]
-        ys = points[1]
+        points = (R @ np.vstack([all_srcX, all_srcY]))
 
         ## Mask by distance to possible grid vertex
         select_by_distance = np.zeros(len(all_srcX), bool)
-        for i,pt in enumerate(points.T):
-            xs = np.delete(points[0], i)
-            ys = np.delete(points[1], i)
+        for masked_idx, main_idx in enumerate(np.argwhere(select_by_shape)[:, 0]):
+        
+            pt = points.T[main_idx]
+            
+            xs = np.delete(points[0][select_by_shape], masked_idx)
+            ys = np.delete(points[1][select_by_shape], masked_idx)
             if np.any(xs, where=np.isclose(pt[0],xs, rtol=0, atol=self.config.distanceFromVertex)) and \
                np.any(ys, where=np.isclose(pt[1],ys, rtol=0, atol=self.config.distanceFromVertex)):
-                select_by_distance[i] = True
+                select_by_distance[main_idx] = True
             else:
-                select_by_distance[i] = False
-                
+                select_by_distance[main_idx] = False
+  
         select = select_by_shape*select_by_distance
 
         srcY = all_srcY[select]
