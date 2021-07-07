@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.orm.collections import attribute_mapped_collection
 
-from mixcoatl.errors import AlreadyExists, MissingKeyword
+from mixcoatl.archive.errors import MissingKeyword
 
 Base = declarative_base()
 Session = sessionmaker()
