@@ -13,6 +13,7 @@ tasks:
       doDefect: False
       doNanMasking: True
       doInterpolate: True
+      doSaturationInterpolation: False
       doBrighterFatter: False
       doDark: False
       doFlat: False
