@@ -123,8 +123,8 @@ class DistortedGrid:
         nrows = meta['GRID_NROWS']
         ncols = meta['GRID_NCOLS']
 
-        norm_dy = np.zeros(nrows*ncols)
-        norm_dx = np.zeros(nrows*ncols)
+        norm_dy = np.full(nrows*ncols, np.nan)
+        norm_dx = np.full(nrows*ncols, np.nan)
 
         all_grid_index = table['spotgrid_index']
         all_norm_dy = table['spotgrid_normalized_dy']
@@ -199,6 +199,28 @@ class DistortedGrid:
 
         return table
 
+    def convert_normalized_shifts(self, norm_dy, norm_dx):
+        """Convert normalized shifts to centroid shifts.
+
+        Parameters
+        ----------
+        norm_dy : `numpy.ndarray`
+            An array of Y-axis normalized shifts.
+        norm_dx : `numpy.ndarray`
+            An array of X-axis normalized shifts.
+
+        Returns
+        -------
+        dy : `numpy.ndarray`
+            An array of Y-axis centroid shifts.
+        dx : `numpy.ndarray`
+            An array of X-axis centroid shifts.
+        """
+        dx = (np.cos(self.theta)*norm_dx - np.sin(self.theta)*norm_dy)*self.xstep
+        dy = (np.sin(self.theta)*norm_dx + np.cos(self.theta)*norm_dy)*self.ystep
+
+        return dy, dx
+
     def get_centroid_shifts(self):
         """Return the centroid shifts given the distorted grid parameters.
         
@@ -209,8 +231,7 @@ class DistortedGrid:
         dx : `numpy.ndarray`
             An array of X-axis centroid shifts.
         """
-        dx = (np.cos(self.theta)*self.norm_dx - np.sin(self.theta)*self.norm_dy)*self.xstep
-        dy = (np.sin(self.theta)*self.norm_dx + np.cos(self.theta)*self.norm_dy)*self.ystep
+        dy, dx = self.convert_normalized_shifts(self.norm_dy, self.norm_dx)
 
         return dy, dx
 
