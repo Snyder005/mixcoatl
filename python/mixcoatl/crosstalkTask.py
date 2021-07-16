@@ -271,6 +271,12 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
+    outputRatioErrors = cT.Output(
+        name="crosstalkRatioErrors",
+        doc="Parameter error on extracted crosstalk pixel ratios.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
@@ -348,6 +354,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
         outputZOffsets = defaultdict(lambda: defaultdict(dict))
         outputYTilts = defaultdict(lambda: defaultdict(dict))
         outputXTilts = defaultdict(lambda: defaultdict(dict))
+        outputRatioErrors = defaultdict(lambda: defaultdict(dict))
 
         badPixels = list(self.config.badMask)
 
@@ -367,7 +374,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
         zoffsetDict = defaultdict(lambda: defaultdict(list))
         ytiltDict = defaultdict(lambda: defaultdict(list))
         xtiltDict = defaultdict(lambda: defaultdict(list))
-
+        ratioErrorDict = defaultdict(lambda: defaultdict(list))
         extractedCount = 0
 
         for sourceAmp in sourceDetector:
@@ -430,6 +437,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                 zoffsetDict[targetAmpName][sourceAmpName] = [float(results[1])]
                 ytiltDict[targetAmpName][sourceAmpName] = [float(results[2])]
                 xtiltDict[targetAmpName][sourceAmpName] = [float(results[3])]
+                ratioErrorDict[targetName][sourceAmpName] = [float(results[4])]
                 extractedCount += 1
 
         self.log.info("Extracted %d pixels from %s -> %s",
@@ -438,7 +446,8 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
         outputZOffsets[targetChip][sourceChip] = zoffsetDict
         outputYTilts[targetChip][sourceChip] = ytiltDict
         outputXTilts[targetChip][sourceChip] = xtiltDict
-        
+        outputRatioErrors[targetChip][sourceChip] = ratioErrorDict
+
         return pipeBase.Struct(
             outputRatios=ddict2dict(outputRatios),
             outputFluxes=ddict2dict(outputFluxes),
