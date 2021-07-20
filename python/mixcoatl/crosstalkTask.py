@@ -437,7 +437,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                 zoffsetDict[targetAmpName][sourceAmpName] = [float(results[1])]
                 ytiltDict[targetAmpName][sourceAmpName] = [float(results[2])]
                 xtiltDict[targetAmpName][sourceAmpName] = [float(results[3])]
-                ratioErrorDict[targetName][sourceAmpName] = [float(results[4])]
+                ratioErrorDict[targetAmpName][sourceAmpName] = [float(results[4])]
                 extractedCount += 1
 
         self.log.info("Extracted %d pixels from %s -> %s",
