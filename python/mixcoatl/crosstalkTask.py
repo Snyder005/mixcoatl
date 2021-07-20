@@ -453,5 +453,6 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
             outputFluxes=ddict2dict(outputFluxes),
             outputZOffsets=ddict2dict(outputZOffsets),
             outputYTilts=ddict2dict(outputYTilts),
-            outputXTilts=ddict2dict(outputXTilts)
+            outputXTilts=ddict2dict(outputXTilts),
+            outputRatioErrors=ddict2dict(outputRatioErrors)
         )
