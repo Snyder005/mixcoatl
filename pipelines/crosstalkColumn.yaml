@@ -4,9 +4,8 @@ tasks:
     class: lsst.ip.isr.isrTask.IsrTask
     config:
       connections.ccdExposure: 'raw'
-      connections.bias: 'bias'
       connections.outputExposure: 'cpCrosstalkProc'
-      doBias: True
+      doBias: False
       doVariance: True
       doLinearize: False
       doCrosstalk: False
@@ -21,8 +20,8 @@ tasks:
       doFringe: False
       doOverscan: True
       overscan.fitType: 'MEDIAN_PER_ROW'
-  crosstalkSatellite:
-    class: mixcoatl.crosstalkTask.CrosstalkSatelliteTask
+  crosstalkColumn:
+    class: mixcoatl.crosstalkTask.CrosstalkColumnTask
     config:
       connections.inputExp: 'cpCrosstalkProc'
       connections.rawExp: 'raw'
@@ -33,3 +32,5 @@ tasks:
       connections.outputXTilts: 'crosstalkBackgroundXTilts'
       connections.outputRatioErrors: 'crosstalkRatioErrors'
       correctNoiseCovariance: True
+      threshold: 200
+      maskLengthX: 40
