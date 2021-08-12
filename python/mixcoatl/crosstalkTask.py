@@ -192,6 +192,10 @@ class CrosstalkColumnTask(pipeBase.PipelineTask,
                 targetAmpName = targetAmp.getName()
                 if sourceAmpName == targetAmpName and sourceChip == targetChip:
                     ratioDict[sourceAmpName][targetAmpName] = []
+                    zoffsetDict[targetAmpName][sourceAmpName] = []
+                    ytiltDict[targetAmpName][sourceAmpName] = []
+                    xtiltDict[targetAmpName][sourceAmpName] = []
+                    ratioErrorDict[targetAmpName][sourceAmpName] = []
                     continue
                 self.log.debug("    Target amplifier: %s", targetAmpName)
 
@@ -424,6 +428,10 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                 targetAmpName = targetAmp.getName()
                 if sourceAmpName == targetAmpName and sourceChip == targetChip:
                     ratioDict[sourceAmpName][targetAmpName] = []
+                    zoffsetDict[targetAmpName][sourceAmpName] = []
+                    ytiltDict[targetAmpName][sourceAmpName] = []
+                    xtiltDict[targetAmpName][sourceAmpName] = []
+                    ratioErrorDict[targetAmpName][sourceAmpName] = []
                     continue
                 self.log.debug("    Target amplifier: %s", targetAmpName)
 

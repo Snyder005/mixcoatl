@@ -33,4 +33,4 @@ tasks:
       connections.outputRatioErrors: 'crosstalkRatioErrors'
       correctNoiseCovariance: True
       threshold: 200
-      maskLengthX: 40
+      maskLengthX: 10
