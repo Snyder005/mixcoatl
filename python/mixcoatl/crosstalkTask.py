@@ -34,13 +34,6 @@ class CrosstalkColumnConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
-    rawExp = cT.Input(
-        name="rawInputs",
-        doc="Input raw exposure to measure noise covariance from.",
-        storageClass="Exposure",
-        dimensions=("instrument", "exposure", "detector"),
-        multiple=False,
-    )
     outputRatios = cT.Output(
         name="crosstalkRatios",
         doc="Extracted crosstalk pixel ratios.",
@@ -136,7 +129,7 @@ class CrosstalkColumnTask(pipeBase.PipelineTask,
     _DefaultName = 'cpCrosstalkColumn'
 
     @pipeBase.timeMethod
-    def run(self, inputExp, rawExp):
+    def run(self, inputExp):
 
         ## run() method
         outputRatios = defaultdict(lambda: defaultdict(dict))
