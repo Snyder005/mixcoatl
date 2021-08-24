@@ -189,7 +189,7 @@ class CrosstalkColumnTask(pipeBase.PipelineTask,
                     continue
                 self.log.debug("    Target amplifier: %s", targetAmpName)
 
-                noise = np.asarray([[sourceAmp.getReadNoise()/sourceAmp.getGain(), 0.],
+                noise = np.asarray([[0., 0.],
                                     [0., targetAmp.getReadNoise()/targetAmp.getGain()]])
                 covariance = np.square(noise)
 
