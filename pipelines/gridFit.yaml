@@ -1,0 +1,14 @@
+description: mixcoatl SPOT analysis
+tasks:
+  characterizeSpots:
+    class: mixcoatl.characterizeSpots.CharacterizeSpotsTask
+    config:
+      connections.exposure: 'postISRCCD'
+      connections.sourceCat: 'spotSrc'
+  gridFit:
+    class: mixcoatl.gridFitTask.GridFitTask
+    config:
+      connections.inputCat: 'spotSrc'
+      connections.bbox: 'postISRCCD.bbox'
+      connections.gridSourceCat: 'gridSpotSrc'
+      shapeUpperBound: 10.0

@@ -216,8 +216,8 @@ class DistortedGrid:
         dx : `numpy.ndarray`
             An array of X-axis centroid shifts.
         """
-        dx = (np.cos(self.theta)*norm_dx - np.sin(self.theta)*norm_dy)*self.xstep
-        dy = (np.sin(self.theta)*norm_dx + np.cos(self.theta)*norm_dy)*self.ystep
+        dx = np.cos(self.theta)*norm_dx*self.xstep - np.sin(self.theta)*norm_dy*self.ystep
+        dy = np.sin(self.theta)*norm_dx*self.xstep + np.cos(self.theta)*norm_dy*self.ystep
 
         return dy, dx
 
