@@ -34,13 +34,6 @@ class CrosstalkColumnConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
-    rawExp = cT.Input(
-        name="rawInputs",
-        doc="Input raw exposure to measure noise covariance from.",
-        storageClass="Exposure",
-        dimensions=("instrument", "exposure", "detector"),
-        multiple=False,
-    )
     outputRatios = cT.Output(
         name="crosstalkRatios",
         doc="Extracted crosstalk pixel ratios.",
@@ -85,11 +78,6 @@ class CrosstalkColumnConfig(pipeBase.PipelineTaskConfig,
                             pipelineConnections=CrosstalkColumnConnections):
     """Configuration for the measurement of pixel ratios.
     """
-    correctNoiseCovariance = Field(
-        dtype=bool,
-        default=False,
-        doc="Correct the effect of correlated read noise."
-    )
     threshold = Field(
         dtype=float,
         default=30000,
@@ -141,7 +129,7 @@ class CrosstalkColumnTask(pipeBase.PipelineTask,
     _DefaultName = 'cpCrosstalkColumn'
 
     @pipeBase.timeMethod
-    def run(self, inputExp, rawExp):
+    def run(self, inputExp):
 
         ## run() method
         outputRatios = defaultdict(lambda: defaultdict(dict))
@@ -182,9 +170,11 @@ class CrosstalkColumnTask(pipeBase.PipelineTask,
             if len(columns) == 0: continue
             select = mixCrosstalk.rectangular_mask(sourceAmpArray, 1000, columns[0],
                                                    ly=self.config.maskLengthY, lx=self.config.maskLengthX)
-            signal = np.mean(sourceAmpArray[:, columns[0]])
+            signal = np.median(sourceAmpArray[:, columns[0]])
             self.log.debug("  Source amplifier: %s", sourceAmpName)
 
+            brightColumnArray = np.zeros(sourceAmpArray.shape)
+            brightColumnArray[:, columns[0]] = signal
             outputFluxes[sourceChip][sourceAmpName] = [float(signal)]
 
             for targetAmp in targetDetector:
@@ -199,20 +189,17 @@ class CrosstalkColumnTask(pipeBase.PipelineTask,
                     continue
                 self.log.debug("    Target amplifier: %s", targetAmpName)
 
-                if self.config.correctNoiseCovariance:
-                    covariance = mixCrosstalk.calculate_covariance(rawExp, sourceAmp, targetAmp)
-                else:
-                    noise = np.asarray([[sourceAmp.getReadNoise()/sourceAmp.getGain(), 0.],
-                                        [0., targetAmp.getReadNoise()/targetAmp.getGain()]])
-                    covariance = np.square(noise)
+                noise = np.asarray([[0., 0.],
+                                    [0., targetAmp.getReadNoise()/targetAmp.getGain()]])
+                covariance = np.square(noise)
 
                 targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
                                                            targetAmp, sourceAmp,
                                                            isTrimmed=self.config.isTrimmed)
                 targetAmpArray = targetAmpImage.array
-                results = mixCrosstalk.crosstalk_fit(sourceAmpArray, targetAmpArray, select, 
+                results = mixCrosstalk.crosstalk_fit(brightColumnArray, targetAmpArray, select, 
                                                      covariance=covariance,
-                                                     correct_covariance=self.config.correctNoiseCovariance, 
+                                                     correct_covariance=False, 
                                                      seed=189)
 
                 ratioDict[targetAmpName][sourceAmpName] = [float(results[0])]

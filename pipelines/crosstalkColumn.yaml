@@ -24,13 +24,11 @@ tasks:
     class: mixcoatl.crosstalkTask.CrosstalkColumnTask
     config:
       connections.inputExp: 'cpCrosstalkProc'
-      connections.rawExp: 'raw'
       connections.outputRatios: 'crosstalkRatios'
       connections.outputFluxes: 'crosstalkFluxes'
       connections.outputZOffsets: 'crosstalkBackgroundZOffsets'
       connections.outputYTilts: 'crosstalkBackgroundYTilts'
       connections.outputXTilts: 'crosstalkBackgroundXTilts'
       connections.outputRatioErrors: 'crosstalkRatioErrors'
-      correctNoiseCovariance: True
-      threshold: 200
+      threshold: 100
       maskLengthX: 10
