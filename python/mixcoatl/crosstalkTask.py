@@ -542,7 +542,7 @@ class CrosstalkSpotConfig(pipeBase.PipelineTaskConfig,
     )
     maskLength = Field(
         dtype=int,
-        default=100,
+        default=200,
         doc="Length of side of square mask."
     )
     ignoreSaturatedPixels = Field(
