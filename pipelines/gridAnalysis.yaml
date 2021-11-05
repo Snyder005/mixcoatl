@@ -33,3 +33,8 @@ tasks:
       connections.bbox: 'postISRCCD.bbox'
       connections.gridSourceCat: 'gridSpotSrc'
       shapeUpperBound: 10.0
+  gridCalibration:
+    class: mixcoatl.gridCalibrationTask.GridCalibrationTask
+    config:
+      connections.inputCatalogs: 'gridSpotSrc'
+      connections.outputTable: 'gridCalibration'

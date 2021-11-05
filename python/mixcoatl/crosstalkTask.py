@@ -573,8 +573,8 @@ class CrosstalkSpotConfig(pipeBase.PipelineTaskConfig,
             if 'SAT' in self.badMask:
                 self.badMask = [mask for mask in self.badMask if mask != 'SAT']
 
-class CrosstalkSpotTask(pipeBase.PipelineTask,
-                        pipeBase.CmdLineTask)
+class CrosstalkSpotTask(pipeBase.PipelineTask, 
+                        pipeBase.CmdLineTask):
 
     ConfigClass = CrosstalkSpotConfig
     _DefaultName = 'cpCrosstalkSpot'

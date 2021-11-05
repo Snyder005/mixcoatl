@@ -1,4 +1,4 @@
-description: mixcoatl SPOT analysis
+description: mixcoatl SPOT gridfit rerun
 tasks:
   characterizeSpots:
     class: mixcoatl.characterizeSpots.CharacterizeSpotsTask
@@ -12,5 +12,5 @@ tasks:
       connections.bbox: 'postISRCCD.bbox'
       connections.gridCalibTable: 'gridCalibration'
       connections.gridSourceCat: 'gridSpotSrc'
-      useGridCalibration: True
       shapeUpperBound: 10.0
+      useGridCalibration: True
