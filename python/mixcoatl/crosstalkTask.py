@@ -234,13 +234,12 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
-    rawExp = cT.PrerequisiteInput(
+    rawExp = cT.Input(
         name="raw",
         doc="Input raw exposure to measure noise covariance from.",
         storageClass="Exposure",
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
-        isCalibration=False
     )
     outputRatios = cT.Output(
         name="crosstalkRatios",
@@ -351,7 +350,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
     _DefaultName = 'cpCrosstalkSatellite'
 
     @pipeBase.timeMethod
-    def run(self, inputExp, rawExp=None):
+    def run(self, inputExp, rawExp):
 
         ## run() method
         outputRatios = defaultdict(lambda: defaultdict(dict))
@@ -476,13 +475,12 @@ class CrosstalkSpotConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
-    rawExp = cT.PrerequisiteInput(
+    rawExp = cT.Input(
         name="raw",
         doc="Input raw exposure to measure noise covariance from.",
         storageClass="Exposure",
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
-        isCalibration=False,
     )
     outputRatios = cT.Output(
         name="crosstalkRatios",
@@ -580,7 +578,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
     _DefaultName = 'cpCrosstalkSpot'
 
     @pipeBase.timeMethod
-    def run(self, inputExp, rawExp=None):
+    def run(self, inputExp, rawExp):
 
         outputRatios = defaultdict(lambda: defaultdict(dict))
         outputFluxes = defaultdict(lambda: defaultdict(dict))
