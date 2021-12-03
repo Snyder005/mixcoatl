@@ -166,8 +166,11 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
 
         ## Add metadata to source catalog
         md = exposure.getMetadata()
-        sources.getMetadata().add("BOTXCAM", md["BOTXCAM"])
-        sources.getMetadata().add("BOTYCAM", md["BOTYCAM"])
+        try:
+            sources.getMetadata().add("BOTXCAM", md["BOTXCAM"])
+            sources.getMetadata().add("BOTYCAM", md["BOTYCAM"])
+        except KeyError:
+            self.log.warning("No projector position metadata found.")
 
         self.display("measure", exposure=exposure, sourceCat=sources)
 
