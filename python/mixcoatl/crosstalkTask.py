@@ -526,7 +526,7 @@ class CrosstalkSpotConnections(pipeBase.PipelineTaskConnections,
             self.prerequisiteInputs.discard("rawExp")
 
 class CrosstalkSpotConfig(pipeBase.PipelineTaskConfig,
-                          pipelineConnections=CrosstalkColumnConnections):
+                          pipelineConnections=CrosstalkSpotConnections):
 
     correctNoiseCovariance = Field(
         dtype=bool,
@@ -620,6 +620,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
             select = mixCrosstalk.rectangular_mask(sourceAmpArray, y, x,
                                                    ly=self.config.maskLength, lx=self.config.maskLength)
             signal = np.max(smoothed)
+            if signal < self.config.threshold: continue
             self.log.debug("  Source amplifier: %s", sourceAmpName)
 
             outputFluxes[sourceChip][sourceAmpName] = [float(signal)]
