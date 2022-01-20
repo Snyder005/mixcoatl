@@ -3,6 +3,7 @@ from astropy.table import Table, vstack
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
+from lsst.utils.timer import timeMethod
 
 cols_to_aggregate = ['spotgrid_index',
                      'spotgrid_normalized_dy',
@@ -111,6 +112,7 @@ class GridCalibrationTask(pipeBase.PipelineTask):
     ConfigClass = GridCalibrationConfig
     _DefaultName = "GridCalibrationTask"
 
+    @timeMethod
     def run(self, inputCatalogs):
 
         ## Grid parameters

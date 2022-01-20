@@ -12,6 +12,7 @@ import lsst.pipe.base as pipeBase
 import lsst.daf.base as dafBase
 import lsst.pipe.base.connectionTypes as cT
 import lsst.meas.extensions.shapeHSM
+from lsst.utils.timer import timeMethod
 from lsst.afw.table import SourceTable, SourceCatalog
 from lsst.meas.algorithms.installGaussianPsf import InstallGaussianPsfTask
 from lsst.obs.base import ExposureIdInfo
@@ -132,7 +133,7 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
         outputCatSchema.getTable().setMetadata(self.algMetadata)
         return {'outputSchema': outputCatSchema}
 
-    @pipeBase.timeMethod
+    @timeMethod
     def run(self, exposure, exposureIdInfo=None):
         
         if not exposure.hasPsf():

@@ -11,6 +11,7 @@ import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
 from lsst.pex.config import Field
+from lsst.utils.timer import timeMethod
 
 from .sourcegrid import DistortedGrid, grid_fit, coordinate_distances, find_midpoint_guess
 
@@ -99,6 +100,7 @@ class GridFitTask(pipeBase.PipelineTask):
     ConfigClass = GridFitConfig
     _DefaultName = "GridFitTask" 
 
+    @timeMethod
     def run(self, inputCat, bbox, gridCalibTable=None):
 
         all_srcY = inputCat['slot_Centroid_y']
