@@ -11,6 +11,7 @@ from scipy.ndimage.filters import gaussian_filter
 from skimage import feature
 from skimage.transform import hough_line, hough_line_peaks
 
+from lsst.utils.timer import timeMethod
 from lsstDebug import getDebugFrame
 from lsst.afw.detection import FootprintSet, Threshold
 from lsst.afw.display import getDisplay
@@ -127,7 +128,7 @@ class CrosstalkColumnTask(pipeBase.PipelineTask,
     ConfigClass = CrosstalkColumnConfig
     _DefaultName = 'cpCrosstalkColumn'
 
-    @pipeBase.timeMethod
+    @timeMethod
     def run(self, inputExp):
 
         ## run() method
@@ -349,7 +350,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
     ConfigClass = CrosstalkSatelliteConfig
     _DefaultName = 'cpCrosstalkSatellite'
 
-    @pipeBase.timeMethod
+    @timeMethod
     def run(self, inputExp, rawExp):
 
         ## run() method
@@ -577,7 +578,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
     ConfigClass = CrosstalkSpotConfig
     _DefaultName = 'cpCrosstalkSpot'
 
-    @pipeBase.timeMethod
+    @timeMethod
     def run(self, inputExp, rawExp):
 
         outputRatios = defaultdict(lambda: defaultdict(dict))

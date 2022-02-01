@@ -3,6 +3,7 @@ from astropy.table import Table, vstack
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
+from lsst.utils.timer import timeMethod
 
 cols_to_aggregate = ['spotgrid_index',
                      'spotgrid_normalized_dy',
@@ -111,6 +112,7 @@ class GridCalibrationTask(pipeBase.PipelineTask):
     ConfigClass = GridCalibrationConfig
     _DefaultName = "GridCalibrationTask"
 
+    @timeMethod
     def run(self, inputCatalogs):
 
         ## Grid parameters
@@ -138,16 +140,16 @@ class GridCalibrationTask(pipeBase.PipelineTask):
             all_data_tables.append(inputCat.asAstropy())
             
         ## Compute data means
-        meta = {'GRID_X0' : np.nanmean(all_x0),
-                'GRID_Y0' : np.nanmean(all_y0),
-                'GRID_XSTEP' : np.nanmean(all_xstep),
-                'GRID_YSTEP' : np.nanmean(all_ystep),
-                'GRID_THETA' : np.nanmean(all_theta),
+        meta = {'GRID_X0' : np.nanmedian(all_x0),
+                'GRID_Y0' : np.nanmedian(all_y0),
+                'GRID_XSTEP' : np.nanmedian(all_xstep),
+                'GRID_YSTEP' : np.nanmedian(all_ystep),
+                'GRID_THETA' : np.nanmedian(all_theta),
                 'GRID_NROWS' : self.config.numRows,
                 'GRID_NCOLS' : self.config.numCols}
         outputTable = vstack(all_data_tables, join_type='exact', metadata_conflicts='silent')\
                              .group_by('spotgrid_index')
-        outputTable = outputTable[cols_to_aggregate].groups.aggregate(np.nanmean)
+        outputTable = outputTable[cols_to_aggregate].groups.aggregate(np.nanmedian)
         outputTable.remove_rows(np.where(outputTable['spotgrid_index'] < 0)[0])
         outputTable.meta.update(meta)
 
