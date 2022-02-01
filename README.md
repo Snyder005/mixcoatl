@@ -16,3 +16,7 @@ The package is divided into separate sections, described as follows:
 * `mixcoatl/python`: This directory is the location of the Python module files. To use the MixCOATL package, this directory should be added to your Python path (e.g. `PYTHONPATH`).
 * `mixcoatl/notebooks`: This directory contains a number of Jupyter notebooks used for demonstrating of the MixCOATL features or new feature development.
 * `mixcoatl/pipelines`: This directory contains the YAML files used to specify MixCOATL analyses within the "pipeline task" formulation of the DM Stack that uses the Gen 3 Butler to interface with a repository of datasets.
+
+## Acknowledgments
+
+This material is based upon work supported by the National Science Foundation under Grant No. AST-2024216.
