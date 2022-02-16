@@ -188,7 +188,11 @@ def circular_mask(imarr, y_center, x_center, radius):
     mask : `numpy.ndarray`, (Ny, Nx)
         2-D mask boolean array.
     """
-    raise NotImplementedError
+    Ny, Nx = imarr.shape
+    Y, X = np.ogrid[:Ny, :Nx]
+    select = np.sqrt(np.square(Y - y_center) + np.square(X - x_center)) < radius
+
+    return select
 
 def crosstalk_model(params, aggressor_imarr):
     """Create crosstalk victim model.

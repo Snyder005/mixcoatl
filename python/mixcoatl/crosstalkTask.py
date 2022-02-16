@@ -539,6 +539,11 @@ class CrosstalkSpotConfig(pipeBase.PipelineTaskConfig,
         default=30000,
         doc="Minimum level of source pixels for which to measure crosstalk."
     )
+    maskRadius = Field(
+        dtype=int,
+        default=10,
+        doc="Radius of circular mask for source signal calculation."
+    )
     maskLength = Field(
         dtype=int,
         default=200,
@@ -620,7 +625,8 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
             y, x = np.unravel_index(smoothed.argmax(), smoothed.shape)
             select = mixCrosstalk.rectangular_mask(sourceAmpArray, y, x,
                                                    ly=self.config.maskLength, lx=self.config.maskLength)
-            signal = np.max(smoothed)
+            signal_select = mixCrosstalk.circular_mask(sourceAmpArray, y, x, radius=self.config.maskRadius)
+            signal = np.median(sourceAmpArray[signal_select])
             if signal < self.config.threshold: continue
             self.log.debug("  Source amplifier: %s", sourceAmpName)
 
