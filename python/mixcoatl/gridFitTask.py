@@ -247,6 +247,11 @@ class GridFitTask(pipeBase.PipelineTask):
         md.add('GRID_YSTEP', grid.ystep)
         md.add('GRID_NCOLS', grid.ncols)
         md.add('GRID_NROWS', grid.nrows)
+        md.add('FIT_NFEV', result.nfev)
+        md.add('FIT_SUCCESS', result.success)
+        md.add('FIT_NDATA', result.ndata)
+        md.add('FIT_CHISQR', result.chisqr)
+        md.add('FIT_REDCHI', result.redchi)
         outputCat.setMetadata(md)
 
         return pipeBase.Struct(gridSourceCat=outputCat)
