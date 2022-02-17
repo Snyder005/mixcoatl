@@ -209,44 +209,45 @@ class GridFitTask(pipeBase.PipelineTask):
                                                           doc='Index of corresponding spot grid source.')
 
         outputCat = afwTable.SourceCatalog(mapper.getOutputSchema())
-        outputCat.extend(inputCat, mapper=mapper)
+        outputCat.extend(inputCat[select], mapper=mapper)
 
         ## Match grid to catalog
         gridY, gridX = grid.get_centroids()
         match_indices, match_distances = coordinate_distances(srcY, srcX, gridY, gridX)
 
         ## Construct new column arrays
-        numSrcs = all_srcY.shape[0]
-        all_gridY = np.full(numSrcs, np.nan)
-        all_gridX = np.full(numSrcs, np.nan)
-        all_normDY = np.full(numSrcs, np.nan)
-        all_normDX = np.full(numSrcs, np.nan)
-        all_gridIndex = np.full(numSrcs, np.nan)
-
-        all_gridY[select] = gridY[match_indices[:, 0]]
-        all_gridX[select] = gridX[match_indices[:, 0]]
-        all_gridIndex[select] = match_indices[:, 0] 
-        dy = all_srcY - all_gridY
-        dx = all_srcX - all_gridX
-        all_normDY = (np.sin(-grid.theta)*dx + np.cos(-grid.theta)*dy)/grid.ystep
-        all_normDX = (np.cos(-grid.theta)*dx - np.sin(-grid.theta)*dy)/grid.xstep 
+        gridIndex = match_indices[:, 0]
+        gridY = gridY[gridIndex]
+        gridX = gridX[gridIndex]
+        dy = srcY - gridY
+        dx = srcX - gridX
+        normDY = (np.sin(-grid.theta)*dx + np.cos(-grid.theta)*dy)/grid.ystep
+        normDX = (np.cos(-grid.theta)*dx - np.sin(-grid.theta)*dy)/grid.xstep 
 
         ## Assign new column arrays to catalog
-        outputCat[gridYCol][:] = all_gridY
-        outputCat[gridXCol][:] = all_gridX
-        outputCat[normDYCol][:] = all_normDY
-        outputCat[normDXCol][:] = all_normDX
-        outputCat[gridIndexCol][:] = all_gridIndex
+        outputCat[gridYCol] = gridY
+        outputCat[gridXCol] = gridX
+        outputCat[normDYCol] = normDY
+        outputCat[normDXCol] = normDX
+        outputCat[gridIndexCol] = gridIndex
         
         ## Add grid parameters to metadata
         md = copy.deepcopy(inputCat.getMetadata())
         md.add('GRID_X0', grid.x0)
+        md.add('GRID_X0ERR', result.params['x0'].stderr)
         md.add('GRID_Y0', grid.y0)
+        md.add('GRID_Y0ERR', result.params['y0'].stderr)
         md.add('GRID_THETA', grid.theta)
+        md.add('GRID_THETAERR', result.params['theta'].stderr)
         md.add('GRID_XSTEP', grid.xstep)
         md.add('GRID_YSTEP', grid.ystep)
         md.add('GRID_NCOLS', grid.ncols)
         md.add('GRID_NROWS', grid.nrows)
+        md.add('FIT_NFEV', result.nfev)
+        md.add('FIT_SUCCESS', result.success)
+        md.add('FIT_NDATA', result.ndata)
+        md.add('FIT_CHISQR', result.chisqr)
+        md.add('FIT_REDCHI', result.redchi)
         outputCat.setMetadata(md)
 
         return pipeBase.Struct(gridSourceCat=outputCat)
