@@ -234,8 +234,11 @@ class GridFitTask(pipeBase.PipelineTask):
         ## Add grid parameters to metadata
         md = copy.deepcopy(inputCat.getMetadata())
         md.add('GRID_X0', grid.x0)
+        md.add('GRID_X0ERR', result.params['x0'].stderr)
         md.add('GRID_Y0', grid.y0)
+        md.add('GRID_Y0ERR', result.params['y0'].stderr)
         md.add('GRID_THETA', grid.theta)
+        md.add('GRID_THETAERR', result.params['theta'].stderr)
         md.add('GRID_XSTEP', grid.xstep)
         md.add('GRID_YSTEP', grid.ystep)
         md.add('GRID_NCOLS', grid.ncols)
