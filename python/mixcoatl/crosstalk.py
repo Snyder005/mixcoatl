@@ -194,6 +194,34 @@ def circular_mask(imarr, y_center, x_center, radius):
 
     return select
 
+def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
+    """Make an annular pixel mask.
+
+    Parameters
+    ----------
+    imarr : `numpy.ndarray`, (Ny, Nx)
+        2-D image pixel array.
+    y_center : `int`
+        Y-axis position of annulus center.
+    x_center : `int`
+        X-axis position of annulus center.
+    inner_radius : `float`
+        Inner radius of the annulus.
+    outer_radius : `float`
+        Outer radius of the annulus.
+
+    Returns
+    -------
+    mask : `numpy.ndarray`, (Ny, Nx)
+        2-X mask boolean array.
+    """
+    Ny, Nx = imarr.shape
+    Y, X = np.ogrid[:Ny, :Nx]
+    R = np.sqrt(np.square(X-x_center) + np.square(Y-y_center))
+    select = (R >= inner_radius) & (R < outer_radius)
+
+    return select
+
 def crosstalk_model(params, aggressor_imarr):
     """Create crosstalk victim model.
 
