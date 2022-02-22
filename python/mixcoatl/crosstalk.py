@@ -215,6 +215,9 @@ def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
     mask : `numpy.ndarray`, (Ny, Nx)
         2-X mask boolean array.
     """
+    if outer_radius <= inner_radius:
+        raise ValueError('outer_radius {0.1f} must be greater then inner_radius {1:.1f').format(inner_radius,
+                                                                                                outer_radius)
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
     R = np.sqrt(np.square(X-x_center) + np.square(Y-y_center))

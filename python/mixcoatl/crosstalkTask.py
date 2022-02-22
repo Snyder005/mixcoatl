@@ -193,10 +193,9 @@ class CrosstalkColumnTask(pipeBase.PipelineTask,
                                     [0., targetAmp.getReadNoise()/targetAmp.getGain()]])
                 covariance = np.square(noise)
 
-                targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
-                                                           targetAmp, sourceAmp,
+                targetAmpImage = CrosstalkCalib.extractAmp(targetIm, targetAmp, sourceAmp,
                                                            isTrimmed=self.config.isTrimmed)
-                targetAmpArray = targetAmpImage.array
+                targetAmpArray = targetAmpImage.image.array
                 results = mixCrosstalk.crosstalk_fit(brightColumnArray, targetAmpArray, select, 
                                                      covariance=covariance,
                                                      correct_covariance=False, 
@@ -433,10 +432,9 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                                         [0., targetAmp.getReadNoise()/targetAmp.getGain()]])
                     covariance = np.square(noise)
 
-                targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
-                                                           targetAmp, sourceAmp,
+                targetAmpImage = CrosstalkCalib.extractAmp(targetIm, targetAmp, sourceAmp,
                                                            isTrimmed=self.config.isTrimmed)
-                targetAmpArray = targetAmpImage.array
+                targetAmpArray = targetAmpImage.image.array
                 results = mixCrosstalk.crosstalk_fit(sourceAmpArray, targetAmpArray, select, 
                                                      covariance=covariance, 
                                                      correct_covariance=self.config.correctNoiseCovariance, 
@@ -536,18 +534,33 @@ class CrosstalkSpotConfig(pipeBase.PipelineTaskConfig,
     )
     threshold = Field(
         dtype=float,
-        default=30000,
+        default=30000.,
         doc="Minimum level of source pixels for which to measure crosstalk."
     )
     maskRadius = Field(
-        dtype=int,
-        default=10,
+        dtype=float,
+        default=10.,
         doc="Radius of circular mask for source signal calculation."
     )
     maskLength = Field(
         dtype=int,
-        default=200,
+        default=250,
         doc="Length of side of square mask."
+    )
+    doAnnularCutout = Field(
+        dtype=bool,
+        default=False,
+        doc="Mask an annular cutout of the square mask."
+    )
+    annulusInnerRadius = Field(
+        dtype=float,
+        default=40.,
+        doc="Inner radius of annulur mask used for cutout."
+    )
+    annulusOuterRadius = Field(
+        dtype=float,
+        default=100.,
+        doc="Outer radius of annulur mask used for cutout."
     )
     ignoreSaturatedPixels = Field(
         dtype=bool,
@@ -625,6 +638,11 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
             y, x = np.unravel_index(smoothed.argmax(), smoothed.shape)
             select = mixCrosstalk.rectangular_mask(sourceAmpArray, y, x,
                                                    ly=self.config.maskLength, lx=self.config.maskLength)
+            if self.config.doAnnularCutout:
+                cutout = ~mixCrosstalk.annular_mask(sourceAmpArray, y, x, 
+                                                    inner_radius=self.config.annulusInnerRadius,
+                                                    outer_radius=self.config.annulusOuterRadius)
+                select = select*cutout
             signal_select = mixCrosstalk.circular_mask(sourceAmpArray, y, x, radius=self.config.maskRadius)
             signal = np.median(sourceAmpArray[signal_select])
             if signal < self.config.threshold: continue
@@ -651,10 +669,9 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
                                         [0., targetAmp.getReadNoise()/targetAmp.getGain()]])
                     covariance = np.square(noise)
 
-                targetAmpImage = CrosstalkCalib.extractAmp(targetIm.image,
-                                                           targetAmp, sourceAmp,
+                targetAmpImage = CrosstalkCalib.extractAmp(targetIm, targetAmp, sourceAmp,
                                                            isTrimmed=self.config.isTrimmed)
-                targetAmpArray = targetAmpImage.array
+                targetAmpArray = targetAmpImage.image.array
                 results = mixCrosstalk.crosstalk_fit(sourceAmpArray, targetAmpArray, select, 
                                                      covariance=covariance, 
                                                      correct_covariance=self.config.correctNoiseCovariance, 
