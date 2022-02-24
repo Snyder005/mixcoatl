@@ -32,5 +32,10 @@ tasks:
       connections.outputYTilts: 'crosstalkBackgroundYTilts'
       connections.outputXTilts: 'crosstalkBackgroundXTilts'
       connections.outputRatioErrors: 'crosstalkRatioErrors'
+      doAnnulurCutout: True
+      cutoutInnerRadius: 40.
+      cutoutOuterRadius: 100.
+      maskLength: 250.
+      maskRadius: 10.
       correctNoiseCovariance: True
       threshold: 5000
