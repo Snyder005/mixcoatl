@@ -84,13 +84,13 @@ class CrosstalkColumnConfig(pipeBase.PipelineTaskConfig,
         doc="Minimum level of source pixels for which to measure crosstalk."
     )
     maskLengthX = Field(
-        dtype=int,
-        default=10,
+        dtype=float,
+        default=10.,
         doc="Length of rectangular mask in x-direction."
     )
     maskLengthY = Field(
-        dtype=int,
-        default=2000,
+        dtype=float,
+        default=2000.,
         doc="Length of postage stamp mask in y-direction."
     )
     ignoreSaturatedPixels = Field(
@@ -305,8 +305,8 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
         doc="High threshold for Canny edge detection."
     )
     maskWidth = Field(
-        dtype=int,
-        default=40,
+        dtype=float,
+        default=40.,
         doc="One-sided width of satellite streak mask."
     )
     cannySigma = Field(
@@ -543,8 +543,8 @@ class CrosstalkSpotConfig(pipeBase.PipelineTaskConfig,
         doc="Radius of circular mask for source signal calculation."
     )
     maskLength = Field(
-        dtype=int,
-        default=250,
+        dtype=float,
+        default=250.,
         doc="Length of side of square mask."
     )
     doAnnularCutout = Field(
