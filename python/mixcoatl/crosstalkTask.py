@@ -489,7 +489,7 @@ class CrosstalkSpotConnections(pipeBase.PipelineTaskConnections,
     )
     outputRatios = cT.Output(
         name="crosstalkRatios",
-        doc="Extracted crosstalk raw pixel ratios.",
+        doc="Extracted crosstalk pixel ratios.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
@@ -519,7 +519,13 @@ class CrosstalkSpotConnections(pipeBase.PipelineTaskConnections,
     )
     outputCoefficientErrors = cT.Output(
         name="crosstalkCoefficientErrors",
-        doc="Standard error on crosstalk coefficients.",
+        doc="Standard error of the crosstalk coefficients.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+        )
+    outputRatioErrors = cT.Output(
+        name="crosstalkRatioErrors",
+        doc="Standard error of the crosstalk pixel ratios.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
         )
@@ -612,6 +618,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
         outputYTilts = defaultdict(lambda: defaultdict(dict))
         outputXTilts = defaultdict(lambda: defaultdict(dict))
         outputCoefficientErrors = defaultdict(lambda: defaultdict(dict))
+        outputRatioErrors = defaultdict(lambda: defaultdict(dict))
 
         badPixels = list(self.config.badMask)
 
@@ -633,6 +640,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
         ytiltDict = defaultdict(lambda: defaultdict(list))
         xtiltDict = defaultdict(lambda: defaultdict(list))
         coefficientErrorDict = defaultdict(lambda: defaultdict(list))
+        ratioErrorDict = defaultdict(lambda: defaultdict(list))
         extractedCount = 0
 
         for sourceAmp in sourceDetector:
@@ -652,7 +660,8 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
                                                     outer_radius=self.config.annulusOuterRadius)
                 select = select*cutout
             signal_select = mixCrosstalk.circular_mask(sourceAmpArray, y, x, radius=self.config.maskRadius)
-            signal = np.median(sourceAmpArray[signal_select])
+            signal = sigma_clipped_stats(sourceAmpArray[signal_select], cenfunc='median', 
+                                         stdfunc=median_absolute_deviation)[1]
             if signal < self.config.threshold: continue
             self.log.debug("  Source amplifier: %s", sourceAmpName)
 
@@ -668,6 +677,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
                     ytiltDict[targetAmpName][sourceAmpName] = []
                     xtiltDict[targetAmpName][sourceAmpName] = []
                     coefficientErrorDict[targetAmpName][sourceAmpName] = []
+                    ratioErrorDict[targetAmpName][sourceAmpName] = []
                     continue
                 self.log.debug("    Target amplifier: %s", targetAmpName)
 
@@ -682,18 +692,22 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
                                                            isTrimmed=self.config.isTrimmed)
                 targetAmpArray = targetAmpImage.image.array
                 ratios = targetAmpArray[signal_select]/signal
+                _, ratio, ratiostdev = sigma_clipped_stats(ratio, cenfunc='median', 
+                                                           stdfunc=median_absolute_deviation)
+                ratio_error = ratio_stdev/np.sqrt(len(ratios))
                 results = mixCrosstalk.crosstalk_fit(sourceAmpArray, targetAmpArray, select, 
                                                      covariance=covariance, 
                                                      correct_covariance=self.config.correctNoiseCovariance, 
                                                      seed=189)
 
                 coefficientDict[targetAmpName][sourceAmpName] = [float(results[0])]
-                ratioDict[targetAmpName][sourceAmpName] = [ratios]
+                ratioDict[targetAmpName][sourceAmpName] = [float(ratio)]
                 zoffsetDict[targetAmpName][sourceAmpName] = [float(results[1])]
                 ytiltDict[targetAmpName][sourceAmpName] = [float(results[2])]
                 xtiltDict[targetAmpName][sourceAmpName] = [float(results[3])]
-                coefficientErrorDict[targetAmpName][sourceAmpName] = [float(results[4])] 
-                extractedCount += len(ratios)
+                coefficientErrorDict[targetAmpName][sourceAmpName] = [float(results[4])]
+                ratioErrorDict[targetAmpName][sourceAmpName] = [float(ratio_error)]
+                extractedCount += 1
 
         self.log.info("Extracted %d pixels from %s -> %s",
                       extractedCount, sourceChip, targetChip)
@@ -703,6 +717,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
         outputYTilts[targetChip][sourceChip] = ytiltDict
         outputXTilts[targetChip][sourceChip] = xtiltDict
         outputCoefficientErrors[targetChip][sourceChip] = coefficientErrorDict
+        outputRatioErrors[targetChip][sourceChip] = ratioErrorDict
 
         return pipeBase.Struct(
             outputCoefficients=ddict2dict(outputCoefficients),
@@ -711,5 +726,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
             outputZOffsets=ddict2dict(outputZOffsets),
             outputYTilts=ddict2dict(outputYTilts),
             outputXTilts=ddict2dict(outputXTilts),
+            outputCoefficientErrors=ddict2dict(outputCoefficientErrors),
             outputRatioErrors=ddict2dict(outputRatioErrors)
         )
+
