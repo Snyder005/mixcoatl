@@ -605,7 +605,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
     @timeMethod
     def run(self, inputExp, rawExp):
 
-        outputCoefficients = defaultdict(lamdba: defaultdict(dict))
+        outputCoefficients = defaultdict(lambda: defaultdict(dict))
         outputRatios = defaultdict(lambda: defaultdict(dict))
         outputFluxes = defaultdict(lambda: defaultdict(dict))
         outputZOffsets = defaultdict(lambda: defaultdict(dict))
@@ -697,13 +697,15 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
 
         self.log.info("Extracted %d pixels from %s -> %s",
                       extractedCount, sourceChip, targetChip)
+        outputCoefficients[targetChip][sourceChip] = coefficientDict
         outputRatios[targetChip][sourceChip] = ratioDict
         outputZOffsets[targetChip][sourceChip] = zoffsetDict
         outputYTilts[targetChip][sourceChip] = ytiltDict
         outputXTilts[targetChip][sourceChip] = xtiltDict
-        outputRatioErrors[targetChip][sourceChip] = ratioErrorDict
+        outputCoefficientErrors[targetChip][sourceChip] = coefficientErrorDict
 
         return pipeBase.Struct(
+            outputCoefficients=ddict2dict(outputCoefficients),
             outputRatios=ddict2dict(outputRatios),
             outputFluxes=ddict2dict(outputFluxes),
             outputZOffsets=ddict2dict(outputZOffsets),
