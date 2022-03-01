@@ -481,9 +481,15 @@ class CrosstalkSpotConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
+    outputCoefficients = cT.Output(
+        name="crosstalkCoefficients",
+        doc="Crosstalk coefficients from model fit.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
     outputRatios = cT.Output(
         name="crosstalkRatios",
-        doc="Extracted crosstalk pixel ratios.",
+        doc="Extracted crosstalk raw pixel ratios.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
@@ -511,12 +517,12 @@ class CrosstalkSpotConnections(pipeBase.PipelineTaskConnections,
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
-    outputRatioErrors = cT.Output(
-        name="crosstalkRatioErrors",
-        doc="Parameter error on extracted crosstalk pixel ratios.",
+    outputCoefficientErrors = cT.Output(
+        name="crosstalkCoefficientErrors",
+        doc="Standard error on crosstalk coefficients.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
-    )
+        )
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
@@ -599,12 +605,13 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
     @timeMethod
     def run(self, inputExp, rawExp):
 
+        outputCoefficients = defaultdict(lamdba: defaultdict(dict))
         outputRatios = defaultdict(lambda: defaultdict(dict))
         outputFluxes = defaultdict(lambda: defaultdict(dict))
         outputZOffsets = defaultdict(lambda: defaultdict(dict))
         outputYTilts = defaultdict(lambda: defaultdict(dict))
         outputXTilts = defaultdict(lambda: defaultdict(dict))
-        outputRatioErrors = defaultdict(lambda: defaultdict(dict))
+        outputCoefficientErrors = defaultdict(lambda: defaultdict(dict))
 
         badPixels = list(self.config.badMask)
 
@@ -620,11 +627,12 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
         bad = sourceIm.getMask().getPlaneBitMask(badPixels)
         self.log.info("Measuring crosstalk from source: %s", sourceChip)
 
+        coefficientDict = defaultdict(lambda: defaultdict(list))
         ratioDict = defaultdict(lambda: defaultdict(list))
         zoffsetDict = defaultdict(lambda: defaultdict(list))
         ytiltDict = defaultdict(lambda: defaultdict(list))
         xtiltDict = defaultdict(lambda: defaultdict(list))
-        ratioErrorDict = defaultdict(lambda: defaultdict(list))
+        coefficientErrorDict = defaultdict(lambda: defaultdict(list))
         extractedCount = 0
 
         for sourceAmp in sourceDetector:
@@ -654,11 +662,12 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
                 # iterate over targetExposure
                 targetAmpName = targetAmp.getName()
                 if sourceAmpName == targetAmpName and sourceChip == targetChip:
+                    coefficientDict[sourceAmpName][targetAmpName] = []
                     ratioDict[sourceAmpName][targetAmpName] = []
                     zoffsetDict[targetAmpName][sourceAmpName] = []
                     ytiltDict[targetAmpName][sourceAmpName] = []
                     xtiltDict[targetAmpName][sourceAmpName] = []
-                    ratioErrorDict[targetAmpName][sourceAmpName] = []
+                    coefficientErrorDict[targetAmpName][sourceAmpName] = []
                     continue
                 self.log.debug("    Target amplifier: %s", targetAmpName)
 
@@ -672,17 +681,19 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
                 targetAmpImage = CrosstalkCalib.extractAmp(targetIm, targetAmp, sourceAmp,
                                                            isTrimmed=self.config.isTrimmed)
                 targetAmpArray = targetAmpImage.image.array
+                ratios = targetAmpArray[signal_select]/signal
                 results = mixCrosstalk.crosstalk_fit(sourceAmpArray, targetAmpArray, select, 
                                                      covariance=covariance, 
                                                      correct_covariance=self.config.correctNoiseCovariance, 
                                                      seed=189)
 
-                ratioDict[targetAmpName][sourceAmpName] = [float(results[0])]
+                coefficientDict[targetAmpName][sourceAmpName] = [float(results[0])]
+                ratioDict[targetAmpName][sourceAmpName] = [ratios]
                 zoffsetDict[targetAmpName][sourceAmpName] = [float(results[1])]
                 ytiltDict[targetAmpName][sourceAmpName] = [float(results[2])]
                 xtiltDict[targetAmpName][sourceAmpName] = [float(results[3])]
-                ratioErrorDict[targetAmpName][sourceAmpName] = [float(results[4])]
-                extractedCount += 1
+                coefficientErrorDict[targetAmpName][sourceAmpName] = [float(results[4])] 
+                extractedCount += len(ratios)
 
         self.log.info("Extracted %d pixels from %s -> %s",
                       extractedCount, sourceChip, targetChip)
