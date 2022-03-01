@@ -692,7 +692,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
                                                            isTrimmed=self.config.isTrimmed)
                 targetAmpArray = targetAmpImage.image.array
                 ratios = targetAmpArray[signal_select]/signal
-                _, ratio, ratiostdev = sigma_clipped_stats(ratio, cenfunc='median', 
+                _, ratio, ratio_stdev = sigma_clipped_stats(ratios, cenfunc='median', 
                                                            stdfunc=median_absolute_deviation)
                 ratio_error = ratio_stdev/np.sqrt(len(ratios))
                 results = mixCrosstalk.crosstalk_fit(sourceAmpArray, targetAmpArray, select, 
