@@ -241,6 +241,12 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
+    outputCoefficients = cT.Output(
+        name="crosstalkRatios",
+        doc="Crosstalk coefficients from model fit.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
     outputRatios = cT.Output(
         name="crosstalkRatios",
         doc="Extracted crosstalk pixel ratios.",
@@ -271,9 +277,15 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
+    outputCoefficientErrors = cT.Output(
+        name="crosstalkCoefficientErrors",
+        doc="Standard error of the crosstalk coefficients.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
     outputRatioErrors = cT.Output(
         name="crosstalkRatioErrors",
-        doc="Parameter error on extracted crosstalk pixel ratios.",
+        doc="Standard error of the crosstalk pixel ratios.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
@@ -283,7 +295,6 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
 
         if config.correctNoiseCovariance is not True:
             self.prerequisiteInputs.discard("rawExp")
-            
 
 class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
                                pipelineConnections=CrosstalkSatelliteConnections):
@@ -352,12 +363,13 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
     @timeMethod
     def run(self, inputExp, rawExp):
 
-        ## run() method
+        outputCoefficients = defaultdict(lambda: defaultdict(dict))
         outputRatios = defaultdict(lambda: defaultdict(dict))
         outputFluxes = defaultdict(lambda: defaultdict(dict))
         outputZOffsets = defaultdict(lambda: defaultdict(dict))
         outputYTilts = defaultdict(lambda: defaultdict(dict))
         outputXTilts = defaultdict(lambda: defaultdict(dict))
+        outputCoefficientErrors = defaultdict(lambda: defaultdict(dict))
         outputRatioErrors = defaultdict(lambda: defaultdict(dict))
 
         badPixels = list(self.config.badMask)
@@ -374,10 +386,12 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
         bad = sourceIm.getMask().getPlaneBitMask(badPixels)
         self.log.info("Measuring crosstalk from source: %s", sourceChip)
 
+        coefficientDict = defaultdict(lambda: defaultdict(list))
         ratioDict = defaultdict(lambda: defaultdict(list))
         zoffsetDict = defaultdict(lambda: defaultdict(list))
         ytiltDict = defaultdict(lambda: defaultdict(list))
         xtiltDict = defaultdict(lambda: defaultdict(list))
+        coefficientErrorDict = defaultdict(lambda: defaultdict(list))
         ratioErrorDict = defaultdict(lambda: defaultdict(list))
         extractedCount = 0
 
@@ -403,12 +417,10 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                                                  width=self.config.maskWidth)
             
             ## Calculate median signal of satellite
-            origin = np.array((0, sourceAmpArray.shape[1]-1))
-            y0, y1 = (mean_dist - origin * np.cos(mean_angle)) / np.sin(mean_angle)
-            x, y = np.linspace(origin[0], origin[1], 1000), np.linspace(y0, y1, 1000)
-            bounds = (y < sourceAmpArray.shape[0]-1)*(0 < y)
-            signals = sourceAmpArray[y[bounds].astype(int), x[bounds].astype(int)]
-            signal = sigma_clipped_stats(signals, cenfunc='median', stdfunc=median_absolute_deviation)[1]
+            signal_select = mixCrosstalk.satellite_mask(sourceAmpArray, mean_angle, mean_dist,
+                                                        width=0.5)
+            signal = sigma_clipped_stats(sourceAmpArray[signal_select], cenfunc='median',
+                                         stdfunc=median_absolute_deviation)[1]
             self.log.debug("  Source amplifier: %s", sourceAmpName)
 
             outputFluxes[sourceChip][sourceAmpName] = [float(signal)]
@@ -417,10 +429,12 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                 # iterate over targetExposure
                 targetAmpName = targetAmp.getName()
                 if sourceAmpName == targetAmpName and sourceChip == targetChip:
+                    coefficientDict[sourceAmpName][targetAmpName] = []
                     ratioDict[sourceAmpName][targetAmpName] = []
                     zoffsetDict[targetAmpName][sourceAmpName] = []
                     ytiltDict[targetAmpName][sourceAmpName] = []
                     xtiltDict[targetAmpName][sourceAmpName] = []
+                    coefficientErrorDict[targetAmpName][sourceAmpName] = []
                     ratioErrorDict[targetAmpName][sourceAmpName] = []
                     continue
                 self.log.debug("    Target amplifier: %s", targetAmpName)
@@ -435,32 +449,42 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                 targetAmpImage = CrosstalkCalib.extractAmp(targetIm, targetAmp, sourceAmp,
                                                            isTrimmed=self.config.isTrimmed)
                 targetAmpArray = targetAmpImage.image.array
+                ratios = targetAmpArray[signal_select]/signal
+                _, ratio, ratio_stdev = sigma_clipped_stats(ratios, cenfunc='median',
+                                                            stdfunc=median_absolute_deviation)
+                ratio_error = ratio_stdev/np.sqrt(len(ratios))
                 results = mixCrosstalk.crosstalk_fit(sourceAmpArray, targetAmpArray, select, 
                                                      covariance=covariance, 
                                                      correct_covariance=self.config.correctNoiseCovariance, 
                                                      seed=189)
 
-                ratioDict[targetAmpName][sourceAmpName] = [float(results[0])]
+                coefficientDict[targetAmpName][sourceAmpName] = [float(results[0])]
+                ratioDict[targetAmpName][sourceAmpName] = [float(ratio)]
                 zoffsetDict[targetAmpName][sourceAmpName] = [float(results[1])]
                 ytiltDict[targetAmpName][sourceAmpName] = [float(results[2])]
                 xtiltDict[targetAmpName][sourceAmpName] = [float(results[3])]
-                ratioErrorDict[targetAmpName][sourceAmpName] = [float(results[4])]
+                coefficientErrorDict[targetAmpName][sourceAmpName] = [float(results[4])]
+                ratioErrorDict[targetAmpName][sourceAmpName] = [float(ratio_error)]
                 extractedCount += 1
 
         self.log.info("Extracted %d pixels from %s -> %s",
                       extractedCount, sourceChip, targetChip)
+        outputCoefficients[targetChip][sourceChip] = coefficientDict
         outputRatios[targetChip][sourceChip] = ratioDict
         outputZOffsets[targetChip][sourceChip] = zoffsetDict
         outputYTilts[targetChip][sourceChip] = ytiltDict
         outputXTilts[targetChip][sourceChip] = xtiltDict
+        outputCoefficientErrors[targetChip][sourceChip] = coefficientErrorDict
         outputRatioErrors[targetChip][sourceChip] = ratioErrorDict
 
         return pipeBase.Struct(
+            outputCoefficients=ddict2dict(outputCoefficients),
             outputRatios=ddict2dict(outputRatios),
             outputFluxes=ddict2dict(outputFluxes),
             outputZOffsets=ddict2dict(outputZOffsets),
             outputYTilts=ddict2dict(outputYTilts),
             outputXTilts=ddict2dict(outputXTilts),
+            outputCoefficientErrors=ddict2dict(outputCoefficientErrors),
             outputRatioErrors=ddict2dict(outputRatioErrors)
         )
 
