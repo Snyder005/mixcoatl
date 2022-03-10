@@ -38,3 +38,7 @@ tasks:
     config:
       connections.inputCatalogs: 'gridSpotSrc'
       connections.outputTable: 'gridCalibration'
+subsets:
+  processCCD:
+    - isr
+    - characterizeSpots

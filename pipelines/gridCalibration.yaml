@@ -1,7 +1,0 @@
-description: mixcoatl SPOTGRID calibration
-tasks:
-  gridCalibration:
-    class: mixcoatl.gridCalibrationTask.GridCalibrationTask
-    config:
-      connections.inputCatalogs: 'gridSpotSrc'
-      connections.outputTable: 'gridCalibration'
