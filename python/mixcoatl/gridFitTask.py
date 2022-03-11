@@ -1,7 +1,3 @@
-"""
-To Do:
-    1. Add gridCalibTable information to Connections and setup optional Butler inclusion (runQuantum?).
-"""
 import numpy as np
 from scipy.spatial import distance
 import copy
@@ -10,7 +6,8 @@ import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
-from lsst.pex.config import Field
+from lsst.obs.lsst import LsstCamMapper as camMapper
+from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
 from lsst.utils.timer import timeMethod
 
 from .sourcegrid import DistortedGrid, grid_fit, coordinate_distances, find_midpoint_guess
@@ -54,42 +51,62 @@ class GridFitConfig(pipeBase.PipelineTaskConfig,
                     pipelineConnections=GridFitConnections):
     """Configuration for GridFitTask."""
 
-    numRows = Field(
+    numRows = pexConfig.Field(
         dtype=int,
         default=49,
         doc="Number of grid rows."
     )
-    numColumns = Field(
+    numColumns = pexConfig.Field(
         dtype=int,
         default=49,
         doc="Number of grid columns."
     )
-    varyTheta = Field(
+    varyTheta = pexConfig.Field(
         dtype=bool,
         default=True,
         doc="Vary theta parameter during model fit."
     )
-    fitMethod = Field(
+    fitMethod = pexConfig.ChoiceField(
         dtype=str,
-        default='least_squares',
+        default="least_squares",
+        allowed={
+            "leastsq" : "Minimization using Levenberg-Marquardt.",
+            "least_squares" : "Minimization using Trust Region Reflective method.",
+            "lbfgsb" : "Minimization using L-BFGS-B."
+        },
         doc="Minimization method for model fit."
     )
-    useGridCalibration = Field(
+    useBOTCoordinates = pexConfig.Field(
+        dtype=bool,
+        default=False,
+        doc="Use BOT X/Y coordinates as initial grid center guess."
+    )
+    botXOffset = pexConfig.Field(
+        dtype=float,
+        default=-0.0,
+        doc="BOT X-coordinate offset in mm."
+    )
+    botYOffset = pexConfig.Field(
+        dtype=float,
+        default=-0.0,
+        doc="BOT Y-coordinate offset in mm."
+    )
+    useGridCalibration = pexConfig.Field(
         dtype=bool,
         default=False,
         doc="Use centroid shifts from grid calibration table?"
     )
-    shapeLowerBound = Field(
+    shapeLowerBound = pexConfig.Field(
         dtype=float,
         default=2.0,
         doc="Lower bound on source second moment; used for masking."
     )
-    shapeUpperBound = Field(
+    shapeUpperBound = pexConfig.Field(
         dtype=float,
         default=20.,
         doc="Upper bound on source second moment; used for masking."
     )
-    distanceFromVertex = Field(
+    distanceFromVertex = pexConfig.Field(
         dtype=float,
         default=5.,
         doc="Allowable distance of each source from a possible grid vertex."
@@ -177,8 +194,17 @@ class GridFitTask(pipeBase.PipelineTask):
         srcX = all_srcX[select]
 
         ## Calculate intial guess for grid center
-        grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta)
-        y0, x0 = grid_center_guess[1], grid_center_guess[0]
+        if self.config.useBOTCoordinates:
+            md = inputCat.getMetadata()
+            botx = md['BOTXCAM'] + self.config.botXOffset
+            boty = md['BOTYCAM'] + self.config.botYOffset
+            camera = camMapper._makeCamera()
+            lct = LsstCameraTransforms(camera)
+            _, x0, y0 = lct.focalMmToCcdPixel(boty, botx)
+            
+        else:
+            grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta)
+            y0, x0 = grid_center_guess[1], grid_center_guess[0]
        
         ## Optionally use normalized centroid shifts from calibration
         if gridCalibTable is not None:
