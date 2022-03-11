@@ -205,7 +205,6 @@ class GridFitTask(pipeBase.PipelineTask):
         else:
             grid_center_guess = find_midpoint_guess(srcY, srcX, xstep, ystep, theta)
             y0, x0 = grid_center_guess[1], grid_center_guess[0]
-        print(y0, x0)
        
         ## Optionally use normalized centroid shifts from calibration
         if gridCalibTable is not None:
