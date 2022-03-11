@@ -43,28 +43,40 @@ class CharacterizeSpotsConnections(pipeBase.PipelineTaskConnections,
 class CharacterizeSpotsConfig(pipeBase.PipelineTaskConfig,
                               pipelineConnections=CharacterizeSpotsConnections):
     """!Config for CharacterizeSpotsTask"""
-    thresholdValue = pexConfig.Field(
+    thresholdValue = pexConfig.RangeField(
         dtype=float,
-        default=200.0,
-        doc="Threshold applied to image value for footprints"
+        optional=False,
+        default=5.0,
+        min=0.0, 
+        doc="Threshold for footprints; exact meaning and units depend on thresholdType.",
+    )
+    thresholdType = pexConfig.ChoiceField(
+        dtype=str, 
+        optional=False, 
+        default="stdev",
+        allowed={
+            "stdev": "threshold applied to image std deviation",
+            "value": "threshold applied to image value",
+        },
+        doc="Specifies the desired type of Threshold.",
     )
     footprintGrowValue = pexConfig.Field(
         dtype=int,
         default=10,
-        doc="Value to grow detected footprints"
+        doc="Value to grow detected footprints",
     )
     maximumFilterBoxWidth = pexConfig.Field(
        dtype=int,
        default=50,
-       doc="Width of footprint box used in maximum filter."
+       doc="Width of footprint box used in maximum filter.",
     )
     measurement = pexConfig.ConfigurableField(
         target=SingleFrameMeasurementTask,
-        doc="Measure sources"
+        doc="Measure sources",
     )
     catalogCalculation = pexConfig.ConfigurableField(
         target=CatalogCalculationTask,
-        doc="Subtask to run catalogCalculation plugins on catalog"
+        doc="Subtask to run catalogCalculation plugins on catalog",
     )
     installSimplePsf = pexConfig.ConfigurableField(
         target=InstallGaussianPsfTask,
@@ -78,6 +90,11 @@ class CharacterizeSpotsConfig(pipeBase.PipelineTaskConfig,
         doc="Strictness of Astropy unit compatibility check, can be 'raise', 'warn' or 'silent'",
         dtype=str,
         default="raise",
+    )
+    statsMask = pexConfig.ListField(
+        dtype=str,
+        doc="Mask planes to ignore when calculating statistics of image (for thresholdType=stdev)",
+        default=['BAD', 'SAT', 'EDGE', 'NO_DATA'],
     )
 
     def setDefaults(self):
@@ -150,9 +167,18 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
         sourceIdFactory = exposureIdInfo.makeSourceIdFactory()
         table = SourceTable.make(self.schema, sourceIdFactory)
         table.setMetadata(self.algMetadata)
+        
+        threshold = self.config.thresholdValue
+        if self.config.thresholdType == 'stdev':
+            image = exposure.getMaskedImage()
+            bad = image.getMask().getPlaneBitMask(self.config.statsMask)
+            sctrl = afwMath.StatisticsControl()
+            sctrl.setAndMask(bad)
+            stats = afwMath.makeStatistics(image, afwMath.STDEVCLIP, sctrl)
+            threshold *= stats.getValue(afwMath.STDEVCLIP)
 
         filtered = maximum_filter(exposure.getImage().array, size=self.config.maximumFilterBoxWidth)
-        detected = (filtered == exposure.getImage().getArray()) & (filtered > self.config.thresholdValue)
+        detected = (filtered == exposure.getImage().getArray()) & (filtered > threshold)
 
         detectedImage = afwImage.ImageF(detected.astype(np.float32))
         fps = afwDetect.FootprintSet(detectedImage, afwDetect.Threshold(0.5))
