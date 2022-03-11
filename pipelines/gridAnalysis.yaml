@@ -26,6 +26,8 @@ tasks:
     config:
       connections.exposure: 'postISRCCD'
       connections.sourceCat: 'spotSrc'
+      thresholdType: 'value'
+      thresholdValue: 200.0
   gridFit:
     class: mixcoatl.gridFitTask.GridFitTask
     config:
