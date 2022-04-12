@@ -242,7 +242,7 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
         multiple=False,
     )
     outputCoefficients = cT.Output(
-        name="crosstalkRatios",
+        name="crosstalkCoefficients",
         doc="Crosstalk coefficients from model fit.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
