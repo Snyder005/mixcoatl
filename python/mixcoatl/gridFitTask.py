@@ -193,6 +193,11 @@ class GridFitTask(pipeBase.PipelineTask):
         srcY = all_srcY[select]
         srcX = all_srcX[select]
 
+        if len(srcX) == 0:
+            raise RuntimeError("No sources remain after masking to fit to grid.")
+
+        self.log.info("Fitting grid to {0} sources.".format(len(srcY)))
+
         ## Calculate intial guess for grid center
         if self.config.useBOTCoordinates:
             md = inputCat.getMetadata()
