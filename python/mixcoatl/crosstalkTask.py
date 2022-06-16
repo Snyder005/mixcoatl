@@ -310,33 +310,33 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
         default=15,
         doc="High threshold for Canny edge detection."
     )
-    minimumKernelHeight = pexConfig.Field(
+    minimumKernelHeight = Field(
         doc="Minimum height of the streak-finding kernel relative to the tallest kernel",
         dtype=float,
         default=0.0,
     )
-    absMinimumKernelHeight = pexConfig.Field(
+    absMinimumKernelHeight = Field(
         doc="Minimum absolute height of the streak-finding kernel",
         dtype=float,
         default=5,
     )
-    clusterMinimumSize = pexConfig.Field(
+    clusterMinimumSize = Field(
         doc="Minimum size in pixels of detected clusters",
         dtype=int,
         default=50,
     )
-    clusterMinimumDeviation = pexConfig.Field(
+    clusterMinimumDeviation = Field(
         doc="Allowed deviation (in pixels) from a straight line for a detected "
             "line",
         dtype=int,
         default=2,
     )
-    delta = pexConfig.Field(
+    delta = Field(
         doc="Stepsize in angle-radius parameter space",
         dtype=float,
         default=0.2,
     )
-    nSigma = pexConfig.Field(
+    nSigma = Field(
         doc="Number of sigmas from center of kernel to include in voting "
             "procedure",
         dtype=float,
@@ -429,13 +429,13 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
             sourceAmpArray = sourceAmpImage.image.array
 
             tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 1000)
-            edges = feature.canny(sourceAmpArray, sigma=self.config.cannySigma, 
+            edges = canny(sourceAmpArray, sigma=self.config.cannySigma, 
                                   low_threshold=self.config.thresholdLow, 
                                   high_threshold=self.config.thresholdHigh)
             lines = lsst.kht.find_lines(edges, self.config.clusterMinimumSize, 
                                         self.config.clusterMinimumDeviation, 
                                         self.config.delta, self.config.minimumKernelHeight, 
-                                        self.config.nsigma, self.config.absMinimumKernelHeight)
+                                        self.config.nSigma, self.config.absMinimumKernelHeight)
 
             angle = np.asarray([l[1]*np.pi/180. for l in lines])
             dist = np.asarray([l[0] for l in lines])
