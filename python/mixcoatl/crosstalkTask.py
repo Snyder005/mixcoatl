@@ -1,9 +1,15 @@
+"""DM Crosstalk Tasks.
+
+To Do: 
+    1. Encorporate bad/saturated pixel masking.
+"""
 import numpy as np
 import copy
 from astropy.stats import median_absolute_deviation, sigma_clipped_stats
 from collections import defaultdict
 from scipy.ndimage.filters import gaussian_filter
-from skimage.feature import canny
+from skimage import feature
+from skimage.transform import hough_line, hough_line_peaks
 
 from lsst.utils.timer import timeMethod
 from lsstDebug import getDebugFrame
@@ -12,7 +18,6 @@ from lsst.afw.display import getDisplay
 from lsst.cp.pipe.utils import ddict2dict
 import lsst.afw.image as afwImage
 from lsst.ip.isr import CrosstalkCalib
-import lsst.kht
 
 import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
@@ -310,38 +315,6 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
         default=15,
         doc="High threshold for Canny edge detection."
     )
-    minimumKernelHeight = Field(
-        doc="Minimum height of the streak-finding kernel relative to the tallest kernel",
-        dtype=float,
-        default=0.0,
-    )
-    absMinimumKernelHeight = Field(
-        doc="Minimum absolute height of the streak-finding kernel",
-        dtype=float,
-        default=5,
-    )
-    clusterMinimumSize = Field(
-        doc="Minimum size in pixels of detected clusters",
-        dtype=int,
-        default=50,
-    )
-    clusterMinimumDeviation = Field(
-        doc="Allowed deviation (in pixels) from a straight line for a detected "
-            "line",
-        dtype=int,
-        default=2,
-    )
-    delta = Field(
-        doc="Stepsize in angle-radius parameter space",
-        dtype=float,
-        default=0.2,
-    )
-    nSigma = Field(
-        doc="Number of sigmas from center of kernel to include in voting "
-            "procedure",
-        dtype=float,
-        default=2,
-    )
     maskWidth = Field(
         dtype=float,
         default=40.,
@@ -429,18 +402,11 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
             sourceAmpArray = sourceAmpImage.image.array
 
             tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 1000)
-            edges = canny(sourceAmpArray, sigma=self.config.cannySigma, 
+            edges = feature.canny(sourceAmpArray, sigma=self.config.cannySigma, 
                                   low_threshold=self.config.thresholdLow, 
                                   high_threshold=self.config.thresholdHigh)
-            lines = lsst.kht.find_lines(edges, self.config.clusterMinimumSize, 
-                                        self.config.clusterMinimumDeviation, 
-                                        self.config.delta, self.config.minimumKernelHeight, 
-                                        self.config.nSigma, self.config.absMinimumKernelHeight)
-
-            angle = np.asarray([l[1]*np.pi/180. for l in lines])
-            dist = np.asarray([l[0] for l in lines])
-            dist = -(dist + 1000*np.sin(angle) + 256*np.cos(angle))
-            angle = angle - np.pi            
+            h, theta, d = hough_line(edges, theta=tested_angles)
+            _, angle, dist = hough_line_peaks(h, theta, d)
 
             if len(angle) != 2:
                 continue
