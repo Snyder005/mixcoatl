@@ -6,7 +6,7 @@ import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
-from lsst.obs.lsst import LsstCamMapper as camMapper
+from lsst.obs.lsst import LsstCam
 from lsst.obs.lsst.cameraTransforms import LsstCameraTransforms
 from lsst.utils.timer import timeMethod
 
@@ -203,7 +203,7 @@ class GridFitTask(pipeBase.PipelineTask):
             md = inputCat.getMetadata()
             botx = md['BOTXCAM'] + self.config.botXOffset
             boty = md['BOTYCAM'] + self.config.botYOffset
-            camera = camMapper._makeCamera()
+            camera = LsstCam().getCamera()
             lct = LsstCameraTransforms(camera)
             _, x0, y0 = lct.focalMmToCcdPixel(boty, botx)
             

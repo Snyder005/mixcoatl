@@ -26,16 +26,10 @@ tasks:
     config:
       connections.inputExp: 'cpCrosstalkProc'
       connections.rawExp: 'raw'
-      connections.outputRatios: 'crosstalkRatios'
-      connections.outputFluxes: 'crosstalkFluxes'
-      connections.outputZOffsets: 'crosstalkBackgroundZOffsets'
-      connections.outputYTilts: 'crosstalkBackgroundYTilts'
-      connections.outputXTilts: 'crosstalkBackgroundXTilts'
-      connections.outputRatioErrors: 'crosstalkRatioErrors'
       doAnnularCutout: True
       annulusInnerRadius: 40.
       annulusOuterRadius: 100.
       maskLength: 250.
       maskRadius: 10.
       correctNoiseCovariance: True
-      threshold: 5000
+      sourceThreshold: 5000
