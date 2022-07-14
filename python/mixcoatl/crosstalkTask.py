@@ -697,7 +697,7 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
             ratio_select = ratio_select*(sourceAmpArray>self.config.ratioThreshold)
 
             outputSignals[sourceChip][sourceAmpName] = [float(signal)]
-            outputFluxes[sourceChip][sourceAmpName] = list(sourceAmpArray[ratio_select])
+            outputFluxes[sourceChip][sourceAmpName] = sourceAmpImage.image.array[ratio_select].tolist()
 
             for targetAmp in targetDetector:
                 # iterate over targetExposure
@@ -731,9 +731,10 @@ class CrosstalkSpotTask(pipeBase.PipelineTask,
                 Y, X = np.mgrid[:Ny, :Nx]
                 bg = results[1] + results[2]*Y + results[3]*X
                 bg_corrected = targetAmpArray - bg
+                ratios = bg_corrected[ratio_select]/sourceAmpArray[ratio_select]
 
                 coefficientDict[targetAmpName][sourceAmpName] = [float(results[0])]
-                ratioDict[targetAmpName][sourceAmpName] = list(bg_corrected[ratio_select]/sourceAmpArray[ratio_select])
+                ratioDict[targetAmpName][sourceAmpName] = ratios.tolist()
                 zoffsetDict[targetAmpName][sourceAmpName] = [float(results[1])]
                 ytiltDict[targetAmpName][sourceAmpName] = [float(results[2])]
                 xtiltDict[targetAmpName][sourceAmpName] = [float(results[3])]
