@@ -44,3 +44,7 @@ subsets:
   processCCD:
     - isr
     - characterizeSpots
+  processGrid:
+    - isr
+    - characterizeSpots
+    - gridFit
