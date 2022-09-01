@@ -1,0 +1,40 @@
+description: mixcoatl CROSSTALK analysis
+tasks:
+  isr:
+    class: lsst.ip.isr.isrTask.IsrTask
+    config:
+      connections.ccdExposure: 'raw'
+      connections.bias: 'bias'
+      connections.outputExposure: 'cpCrosstalkProc'
+      doBias: True
+      doVariance: True
+      doLinearize: False
+      doCrosstalk: False
+      doDefect: False
+      doNanMasking: True
+      doInterpolate: True
+      doSaturationInterpolation: False
+      doBrighterFatter: False
+      doDark: False
+      doFlat: False
+      doApplyGains: False
+      doFringe: False
+      doOverscan: True
+      overscan.fitType: 'MEDIAN_PER_ROW'
+  crosstalkSpot:
+    class: mixcoatl.crosstalkTask.CrosstalkSpotTask
+    config:
+      connections.inputExp: 'cpCrosstalkProc'
+      connections.rawExp: 'raw'
+      doAnnularCutout: True
+      annulusInnerRadius: 40.
+      annulusOuterRadius: 100.
+      maskLength: 250.
+      maskRadius: 10.
+      correctNoiseCovariance: True
+      sourceThreshold: 5000
+  crosstalkSolve:
+    class: lsst.cp.pipe.CrosstalkSolveTask
+    config:
+        connections.inputRatios: 'crosstalkCoefficients'
+        connections.camera: 'camera'
