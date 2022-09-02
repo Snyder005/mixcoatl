@@ -303,7 +303,7 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
     )
     thresholdLow = Field(
         dtype=float,
-        default=1,
+        default=5,
         doc="Low threshold for Canny edge detection."
     )
     thresholdHigh = Field(
@@ -462,7 +462,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask,
                                                      seed=189)
 
                 ## Calculate background-subtracted ratios
-                Ny, Nx = sourceAmpArray
+                Ny, Nx = sourceAmpArray.shape
                 Y, X = np.mgrid[:Ny, :Nx]
                 bg = results[1] + results[2]*Y + results[3]*X
                 bg_corrected = targetAmpArray - bg
