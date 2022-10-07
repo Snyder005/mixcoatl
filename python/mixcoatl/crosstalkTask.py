@@ -116,8 +116,7 @@ class CrosstalkColumnConfig(pipeBase.PipelineTaskConfig,
             if 'SAT' in self.badMask:
                 self.badMask = [mask for mask in self.badMask if mask != 'SAT']
 
-class CrosstalkColumnTask(pipeBase.PipelineTask,
-                          pipeBase.CmdLineTask):
+class CrosstalkColumnTask(pipeBase.PipelineTask):
     """Task to measure pixel ratios to find crosstalk.
     """
     ConfigClass = CrosstalkColumnConfig
@@ -354,8 +353,7 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
             if 'SAT' in self.badMask:
                 self.badMask = [mask for mask in self.badMask if mask != 'SAT']
 
-class CrosstalkSatelliteTask(pipeBase.PipelineTask,
-                             pipeBase.CmdLineTask):
+class CrosstalkSatelliteTask(pipeBase.PipelineTask):
     """Task to measure pixel ratios to find crosstalk.
     """
     ConfigClass = CrosstalkSatelliteConfig
@@ -639,8 +637,7 @@ class CrosstalkSpotConfig(pipeBase.PipelineTaskConfig,
             if 'SAT' in self.badMask:
                 self.badMask = [mask for mask in self.badMask if mask != 'SAT']
 
-class CrosstalkSpotTask(pipeBase.PipelineTask, 
-                        pipeBase.CmdLineTask):
+class CrosstalkSpotTask(pipeBase.PipelineTask):
 
     ConfigClass = CrosstalkSpotConfig
     _DefaultName = 'cpCrosstalkSpot'
