@@ -225,6 +225,31 @@ def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
 
     return select
 
+def make_streak_mask(imarr, line, width):
+    
+    Ny, Nx = imarr.shape
+    Y, X = np.ogrid[:Ny, :Nx]
+    theta = line.theta*np.pi/180.
+    rho = line.rho
+    x0 = (Nx-1)/2.
+    y0 = (Ny-1)/2.
+    
+    select = np.abs(((X-x0)*np.cos(theta) + (Y-y0)*np.sin(theta)) - rho) < width
+
+    return select
+
+def background_model(params, imarr):
+
+    offset_z = params[0]
+    tilt_y = params[1]
+    tilt_x = params[2]
+
+    Ny, Nx = imarr.shape
+    Y, X = np.mgrid[:Ny, :Nx]
+    bg = offset_z = tilt_y*Y + tilt_x*X
+
+    return bg
+
 def crosstalk_model(params, aggressor_imarr):
     """Create crosstalk victim model.
 
@@ -246,14 +271,12 @@ def crosstalk_model(params, aggressor_imarr):
     """
     ## Model parameters
     crosstalk_coeff = params[0]
-    offset_z = params[1]
-    tilt_y = params[2]
-    tilt_x = params[3]
+    bg = background_model(params[1:])
 
     ## Construct model
     Ny, Nx = aggressor_imarr.shape
     Y, X = np.mgrid[:Ny, :Nx]
-    model = crosstalk_coeff*aggressor_imarr + tilt_y*Y + tilt_x*X + offset_z
+    model = crosstalk_coeff*aggressor_imarr + bg
     
     return model
 
