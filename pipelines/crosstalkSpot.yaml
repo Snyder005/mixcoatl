@@ -22,7 +22,7 @@ tasks:
       doOverscan: True
       overscan.fitType: 'MEDIAN_PER_ROW'
   crosstalkSpot:
-    class: mixcoatl.crosstalkTask.CrosstalkSpotTask
+    class: mixcoatl.crosstalkSpot.CrosstalkSpotTask
     config:
       connections.inputExp: 'cpCrosstalkProc'
       connections.rawExp: 'raw'
