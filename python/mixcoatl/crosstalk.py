@@ -225,49 +225,104 @@ def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
 
     return select
 
-def crosstalk_model(params, aggressor_imarr):
-    """Create crosstalk victim model.
+def make_streak_mask(imarr, line, width):
+    """Make a pixel mask along a straight line.
+
+    Parameters
+    ----------
+    imarr : `numpy.ndarray`, (Ny, Nx)
+        2-D image pixel array.
+    line : `Line`
+        Parameters of a line profile from which to derive the pixel mask.
+    width : `float`
+        Width of the mask.
+    
+    Returns
+    -------
+    mask : `numpy.ndarray`, (Ny, Nx)
+        2-D mask boolean array.
+    """
+    Ny, Nx = imarr.shape
+    Y, X = np.ogrid[:Ny, :Nx]
+    theta = line.theta*np.pi/180.
+    rho = line.rho
+    x0 = (Nx-1)/2.
+    y0 = (Ny-1)/2.
+    
+    select = np.abs(((X-x0)*np.cos(theta) + (Y-y0)*np.sin(theta)) - rho) < width/2.
+
+    return select
+
+def background_model(params, shape):
+    """Create background model.
+
+    Parameters
+    ----------
+    params : array-like, (3,)
+        Input background model parameters:
+        - Y-axis tilt.
+        - X-axis tilt.
+        - Constant offset.
+    shape : array-like, (2,)
+        Dimensions of 2-D background model pixel array.
+
+    Returns
+    -------
+    model : `numpy.ndarray`, (shape)
+        2-D background model pixel array.
+    """
+
+    offset_z = params[0]
+    tilt_y = params[1]
+    tilt_x = params[2]
+
+    Ny, Nx = shape
+    Y, X = np.mgrid[:Ny, :Nx]
+    model = offset_z = tilt_y*Y + tilt_x*X
+
+    return model
+
+def crosstalk_model(params, source_imarr):
+    """Create crosstalk target model.
 
     Parameters
     ----------
     params : array-like, (4,)
-        Input victim model parameters:
+        Input target model parameters:
         - crosstalk coefficient.
         - Y-axis tilt.
         - X-axis tilt.
         - Constant offset.
     aggressor_imarr : `numpy.ndarray`, (Ny, Nx)
-        2-D aggressor image pixel array.
+        2-D source image pixel array.
 
     Returns
     -------
     model : `numpy.ndarray`, (Ny, Nx)
-        2-D victim model pixel array.
+        2-D target model pixel array.
     """
     ## Model parameters
     crosstalk_coeff = params[0]
-    offset_z = params[1]
-    tilt_y = params[2]
-    tilt_x = params[3]
+    bg = background_model(params[1:], source_imarr.shape)
 
     ## Construct model
-    Ny, Nx = aggressor_imarr.shape
+    Ny, Nx = source_imarr.shape
     Y, X = np.mgrid[:Ny, :Nx]
-    model = crosstalk_coeff*aggressor_imarr + tilt_y*Y + tilt_x*X + offset_z
+    model = crosstalk_coeff*source_imarr + tilt_y*Y + tilt_x*X + offset_z
     
     return model
 
-def crosstalk_fit(aggressor_array, victim_array, select, covariance,
+def crosstalk_fit(source_array, target_array, select, covariance,
                   correct_covariance=False, seed=None):
-    """Perform crosstalk victim model least-squares minimization.
+    """Perform crosstalk target model least-squares minimization.
 
     Parameters
     ----------
-    aggressor_stamp: `numpy.ndarray`, (Ny, Nx)
-        2-D aggressor postage stamp pixel array.
-    victim_stamp: `numpy.ndarray`, (Ny, Nx)
-        2-D victim postage stamp pixel array.
-    mask: `numpy.ndarray`, (Ny, Nx)
+    source_array: `numpy.ndarray`, (Ny, Nx)
+        2-D source pixel array.
+    target_array: `numpy.ndarray`, (Ny, Nx)
+        2-D target pixel array.
+    select: `numpy.ndarray`, (Ny, Nx)
         2-D mask boolean array.
     covariance : `numpy.ndarray`, (2, 2)
         Covariance between read noise of amplifiers.
@@ -292,8 +347,8 @@ def crosstalk_fit(aggressor_array, victim_array, select, covariance,
         - Reduced degrees of freedom.
     """    
     noise = np.sqrt(np.trace(covariance))
-    aggressor_imarr = copy.deepcopy(aggressor_array)
-    victim_imarr = copy.deepcopy(victim_array)
+    source_imarr = copy.deepcopy(source_array)
+    target_imarr = copy.deepcopy(target_array)
 
     ## Reduce correlated noise
     if correct_covariance:
@@ -303,25 +358,25 @@ def crosstalk_fit(aggressor_array, victim_array, select, covariance,
         np.fill_diagonal(reverse_covariance, diag)
 
         rng = np.random.default_rng(seed)
-        correction = rng.multivariate_normal([0.0, 0.0], reverse_covariance, size=aggressor_imarr.shape)
+        correction = rng.multivariate_normal([0.0, 0.0], reverse_covariance, size=source_imarr.shape)
 
-        aggressor_imarr += correction[:, :, 0]
-        victim_imarr += correction[:, :, 1]
+        source_imarr += correction[:, :, 0]
+        target_imarr += correction[:, :, 1]
         noise *= np.sqrt(2)
 
-    victim_stamp = victim_imarr[select]
+    target_stamp = target_imarr[select]
 
     ## Construct masked, compressed basis arrays
-    ay, ax = aggressor_imarr.shape
+    ay, ax = source_imarr.shape
     Z = np.ones((ay, ax))[select]
     Y, X = np.mgrid[:ay, :ax]
     Y = Y[select]
     X = X[select]
-    aggressor_stamp = aggressor_imarr[select]
+    source_stamp = source_imarr[select]
 
     ## Perform least squares parameter estimation
-    b = victim_stamp/noise
-    A = np.vstack([aggressor_stamp, Z, Y, X]).T/noise
+    b = target_stamp/noise
+    A = np.vstack([source_stamp, Z, Y, X]).T/noise
     params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
     covar = np.linalg.inv(np.dot(A.T, A))
     dof = b.shape[0] - 4

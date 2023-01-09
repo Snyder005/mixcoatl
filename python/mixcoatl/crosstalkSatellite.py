@@ -116,8 +116,8 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
     )
     maskWidth = Field(
         dtype=float,
-        default=40.,
-        doc="One-sided width of satellite streak mask."
+        default=80.,
+        doc="Width of satellite streak mask."
     )
     cannySigma = Field(
         dtype=float,
