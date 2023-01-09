@@ -1,12 +1,3 @@
-"""Crosstalk functions and classes.
-
-This module contains a number of function and class definitions that are used
-for performing the measurement of electronic crosstalk in multi-segmented CCD
-images.
-
-To Do:
-    * Modify find_bright_columns to take DM objects as input parameters.
-"""
 import copy
 import numpy as np
 from astropy.io import fits
@@ -278,7 +269,7 @@ def background_model(params, shape):
 
     Ny, Nx = shape
     Y, X = np.mgrid[:Ny, :Nx]
-    model = offset_z = tilt_y*Y + tilt_x*X
+    model = offset_z + tilt_y*Y + tilt_x*X
 
     return model
 
@@ -308,7 +299,7 @@ def crosstalk_model(params, source_imarr):
     ## Construct model
     Ny, Nx = source_imarr.shape
     Y, X = np.mgrid[:Ny, :Nx]
-    model = crosstalk_coeff*source_imarr + tilt_y*Y + tilt_x*X + offset_z
+    model = crosstalk_coeff*source_imarr + bg
     
     return model
 
