@@ -1,12 +1,3 @@
-"""Crosstalk functions and classes.
-
-This module contains a number of function and class definitions that are used
-for performing the measurement of electronic crosstalk in multi-segmented CCD
-images.
-
-To Do:
-    * Modify find_bright_columns to take DM objects as input parameters.
-"""
 import copy
 import numpy as np
 from astropy.io import fits
@@ -16,7 +7,6 @@ from lsst.afw.detection import FootprintSet, Threshold
 
 def calculate_covariance(exposure, amp1, amp2):
     """Calculate read noise covariance between amplifiers.
-
     Parameters
     ----------
     exposure : `lsst.afw.image.Exposure`
@@ -25,7 +15,6 @@ def calculate_covariance(exposure, amp1, amp2):
         First amplifier to use in covariance calculation.
     amp2 : `lsst.afw.cameraGeom.Amplifier`
         Second amplifier to use in covariance calculation.
-
     Returns
     -------
     cov : `numpy.ndarray`, (2, 2)
@@ -52,7 +41,6 @@ def find_bright_columns(imarr, threshold):
         An array representing an image to analyze.
     threshold : `float`
         Pixel value threshold defining a bright column.
-
     Returns
     -------
     bright_cols : `list`
@@ -90,7 +78,6 @@ def bad_column(column_indices, threshold):
         List of column indices.
     threshold : `int`
         Number of bad pixels required to mark the column as bad.
-
     Returns
     -------
     is_bad_column : `bool`
@@ -118,7 +105,6 @@ def bad_column(column_indices, threshold):
 
 def rectangular_mask(imarr, y_center, x_center, lx, ly):
     """Make a rectangular pixel mask.
-
     Parameters
     ----------
     imarr : `numpy.ndarray`, (Ny, Nx)
@@ -131,7 +117,6 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
         Length of rectangle along X-axis.
     ly : `int`
         Length of rectangle along Y-axis.
-
     Returns
     -------
     mask : `numpy.ndarray`, (Ny, Nx)
@@ -145,7 +130,6 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
 
 def satellite_mask(imarr, angle, distance, width):
     """Make a pixel mask along a target line.
-
     Parameters
     ----------
     imarr : `numpy.ndarray`, (Ny, Nx)
@@ -157,7 +141,6 @@ def satellite_mask(imarr, angle, distance, width):
         Distance from the origin to the closest point on the target line.
     width : `float`
         Width of the mask extending from either side of the target line.
-
     Returns
     -------
     mask : `numpy.ndarray`, (Ny, Nx)
@@ -171,7 +154,6 @@ def satellite_mask(imarr, angle, distance, width):
 
 def circular_mask(imarr, y_center, x_center, radius):
     """Make a circular pixel mask.
-
     Parameters
     ----------
     imarr : `numpy.ndarray`, (Ny, Nx)
@@ -182,7 +164,6 @@ def circular_mask(imarr, y_center, x_center, radius):
         X-axis position of circle center.
     radius : `float`
         Radius of the circle.
-
     Returns
     -------
     mask : `numpy.ndarray`, (Ny, Nx)
@@ -196,7 +177,6 @@ def circular_mask(imarr, y_center, x_center, radius):
 
 def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
     """Make an annular pixel mask.
-
     Parameters
     ----------
     imarr : `numpy.ndarray`, (Ny, Nx)
@@ -209,7 +189,6 @@ def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
         Inner radius of the annulus.
     outer_radius : `float`
         Outer radius of the annulus.
-
     Returns
     -------
     mask : `numpy.ndarray`, (Ny, Nx)
@@ -226,7 +205,21 @@ def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
     return select
 
 def make_streak_mask(imarr, line, width):
+    """Make a pixel mask along a straight line.
+    Parameters
+    ----------
+    imarr : `numpy.ndarray`, (Ny, Nx)
+        2-D image pixel array.
+    line : `Line`
+        Parameters of a line profile from which to derive the pixel mask.
+    width : `float`
+        Width of the mask.
     
+    Returns
+    -------
+    mask : `numpy.ndarray`, (Ny, Nx)
+        2-D mask boolean array.
+    """
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
     theta = line.theta*np.pi/180.
@@ -234,63 +227,75 @@ def make_streak_mask(imarr, line, width):
     x0 = (Nx-1)/2.
     y0 = (Ny-1)/2.
     
-    select = np.abs(((X-x0)*np.cos(theta) + (Y-y0)*np.sin(theta)) - rho) < width
+    select = np.abs(((X-x0)*np.cos(theta) + (Y-y0)*np.sin(theta)) - rho) < width/2.
 
     return select
 
-def background_model(params, imarr):
+def background_model(params, shape):
+    """Create background model.
+    Parameters
+    ----------
+    params : array-like, (3,)
+        Input background model parameters:
+        - Y-axis tilt.
+        - X-axis tilt.
+        - Constant offset.
+    shape : array-like, (2,)
+        Dimensions of 2-D background model pixel array.
+    Returns
+    -------
+    model : `numpy.ndarray`, (shape)
+        2-D background model pixel array.
+    """
 
     offset_z = params[0]
     tilt_y = params[1]
     tilt_x = params[2]
 
-    Ny, Nx = imarr.shape
+    Ny, Nx = shape
     Y, X = np.mgrid[:Ny, :Nx]
-    bg = offset_z = tilt_y*Y + tilt_x*X
+    model = offset_z + tilt_y*Y + tilt_x*X
 
-    return bg
+    return model
 
-def crosstalk_model(params, aggressor_imarr):
-    """Create crosstalk victim model.
-
+def crosstalk_model(params, source_imarr):
+    """Create crosstalk target model.
     Parameters
     ----------
     params : array-like, (4,)
-        Input victim model parameters:
+        Input target model parameters:
         - crosstalk coefficient.
         - Y-axis tilt.
         - X-axis tilt.
         - Constant offset.
     aggressor_imarr : `numpy.ndarray`, (Ny, Nx)
-        2-D aggressor image pixel array.
-
+        2-D source image pixel array.
     Returns
     -------
     model : `numpy.ndarray`, (Ny, Nx)
-        2-D victim model pixel array.
+        2-D target model pixel array.
     """
     ## Model parameters
     crosstalk_coeff = params[0]
-    bg = background_model(params[1:])
+    bg = background_model(params[1:], source_imarr.shape)
 
     ## Construct model
-    Ny, Nx = aggressor_imarr.shape
+    Ny, Nx = source_imarr.shape
     Y, X = np.mgrid[:Ny, :Nx]
-    model = crosstalk_coeff*aggressor_imarr + bg
+    model = crosstalk_coeff*source_imarr + bg
     
     return model
 
-def crosstalk_fit(aggressor_array, victim_array, select, covariance,
+def crosstalk_fit(source_array, target_array, select, covariance,
                   correct_covariance=False, seed=None):
-    """Perform crosstalk victim model least-squares minimization.
-
+    """Perform crosstalk target model least-squares minimization.
     Parameters
     ----------
-    aggressor_stamp: `numpy.ndarray`, (Ny, Nx)
-        2-D aggressor postage stamp pixel array.
-    victim_stamp: `numpy.ndarray`, (Ny, Nx)
-        2-D victim postage stamp pixel array.
-    mask: `numpy.ndarray`, (Ny, Nx)
+    source_array: `numpy.ndarray`, (Ny, Nx)
+        2-D source pixel array.
+    target_array: `numpy.ndarray`, (Ny, Nx)
+        2-D target pixel array.
+    select: `numpy.ndarray`, (Ny, Nx)
         2-D mask boolean array.
     covariance : `numpy.ndarray`, (2, 2)
         Covariance between read noise of amplifiers.
@@ -298,7 +303,6 @@ def crosstalk_fit(aggressor_array, victim_array, select, covariance,
         Correct covariance between read noise of amplifiers.
     seed : `int`
         Seed to initialize random generator.
-
     Returns
     -------
     results : `numpy.ndarray`, (10,)
@@ -315,8 +319,8 @@ def crosstalk_fit(aggressor_array, victim_array, select, covariance,
         - Reduced degrees of freedom.
     """    
     noise = np.sqrt(np.trace(covariance))
-    aggressor_imarr = copy.deepcopy(aggressor_array)
-    victim_imarr = copy.deepcopy(victim_array)
+    source_imarr = copy.deepcopy(source_array)
+    target_imarr = copy.deepcopy(target_array)
 
     ## Reduce correlated noise
     if correct_covariance:
@@ -326,25 +330,25 @@ def crosstalk_fit(aggressor_array, victim_array, select, covariance,
         np.fill_diagonal(reverse_covariance, diag)
 
         rng = np.random.default_rng(seed)
-        correction = rng.multivariate_normal([0.0, 0.0], reverse_covariance, size=aggressor_imarr.shape)
+        correction = rng.multivariate_normal([0.0, 0.0], reverse_covariance, size=source_imarr.shape)
 
-        aggressor_imarr += correction[:, :, 0]
-        victim_imarr += correction[:, :, 1]
+        source_imarr += correction[:, :, 0]
+        target_imarr += correction[:, :, 1]
         noise *= np.sqrt(2)
 
-    victim_stamp = victim_imarr[select]
+    target_stamp = target_imarr[select]
 
     ## Construct masked, compressed basis arrays
-    ay, ax = aggressor_imarr.shape
+    ay, ax = source_imarr.shape
     Z = np.ones((ay, ax))[select]
     Y, X = np.mgrid[:ay, :ax]
     Y = Y[select]
     X = X[select]
-    aggressor_stamp = aggressor_imarr[select]
+    source_stamp = source_imarr[select]
 
     ## Perform least squares parameter estimation
-    b = victim_stamp/noise
-    A = np.vstack([aggressor_stamp, Z, Y, X]).T/noise
+    b = target_stamp/noise
+    A = np.vstack([source_stamp, Z, Y, X]).T/noise
     params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
     covar = np.linalg.inv(np.dot(A.T, A))
     dof = b.shape[0] - 4

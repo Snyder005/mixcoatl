@@ -106,8 +106,8 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
     )
     maskWidth = Field(
         dtype=float,
-        default=40.,
-        doc="One-sided width of satellite streak mask."
+        default=80.,
+        doc="Width of satellite streak mask."
     )
     ignoreSaturatedPixels = Field(
         dtype=bool,
@@ -255,7 +255,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                                                          seed=189)
 
                     ## Calculate background-subtracted ratios
-                    bg = mixCrosstalk.background_model(results[1:], sourceAmpArray)
+                    bg = mixCrosstalk.background_model(results[1:], sourceAmpArray.shape)
                     ratios = (targetAmpArray - bg)[ratio_select]/sourceAmpArray[ratio_select]
 
                     coefficientDict[targetAmpName][sourceAmpName] = [float(results[0])]
