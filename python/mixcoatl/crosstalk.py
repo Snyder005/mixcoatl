@@ -231,7 +231,7 @@ def make_streak_mask(imarr, line, width):
 
     return select
 
-def background_model(params, shape):
+def background_model(params, shape, order=1):
     """Create background model.
     Parameters
     ----------
@@ -248,17 +248,19 @@ def background_model(params, shape):
         2-D background model pixel array.
     """
 
-    offset_z = params[0]
-    tilt_y = params[1]
-    tilt_x = params[2]
-
-    Ny, Nx = shape
-    Y, X = np.mgrid[:Ny, :Nx]
-    model = offset_z + tilt_y*Y + tilt_x*X
+    model = np.ones(shape)*params[0]
+    if order >= 1:
+        Ny, Nx = shape
+        Y, X = np.mgrid[:Ny, :Nx]
+        model += params[1]*Y + params[2]*X
+        if order == 2:
+            model += params[3]*Y*Y + params[4]*X*X + params[5]*X*Y
+    else:
+        raise ValueError("Order must be an integer greater than zero: {0}".format(order))
 
     return model
 
-def crosstalk_model(params, source_imarr):
+def crosstalk_model(params, source_imarr, order=1):
     """Create crosstalk target model.
     Parameters
     ----------
@@ -277,17 +279,15 @@ def crosstalk_model(params, source_imarr):
     """
     ## Model parameters
     crosstalk_coeff = params[0]
-    bg = background_model(params[1:], source_imarr.shape)
+    bg = background_model(params[1:], source_imarr.shape, order=1)
 
     ## Construct model
-    Ny, Nx = source_imarr.shape
-    Y, X = np.mgrid[:Ny, :Nx]
     model = crosstalk_coeff*source_imarr + bg
     
     return model
 
 def crosstalk_fit(source_array, target_array, select, covariance,
-                  correct_covariance=False, seed=None):
+                  order=1, correct_covariance=False, seed=None):
     """Perform crosstalk target model least-squares minimization.
     Parameters
     ----------
@@ -340,15 +340,22 @@ def crosstalk_fit(source_array, target_array, select, covariance,
 
     ## Construct masked, compressed basis arrays
     ay, ax = source_imarr.shape
-    Z = np.ones((ay, ax))[select]
-    Y, X = np.mgrid[:ay, :ax]
-    Y = Y[select]
-    X = X[select]
-    source_stamp = source_imarr[select]
+    bases = [source_imarr[select]]
+    bases.append(np.ones((ay, ax))[select])
+    if order >= 1:
+        Y, X = np.mgrid[:ay, :ax]
+        bases.append(Y[select])
+        bases.append(X[select])
+        if order == 2:
+            bases.append((Y*Y)[select])
+            bases.append((X*X)[select])
+            bases.append((X*Y)[select])
+    else:
+        raise ValueError("Order must be an integer greater than zero: {0}".format(order))
 
     ## Perform least squares parameter estimation
     b = target_stamp/noise
-    A = np.vstack([source_stamp, Z, Y, X]).T/noise
+    A = np.vstack(bases).T/noise
     params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
     covar = np.linalg.inv(np.dot(A.T, A))
     dof = b.shape[0] - 4

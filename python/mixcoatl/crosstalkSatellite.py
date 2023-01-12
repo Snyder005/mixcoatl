@@ -14,7 +14,7 @@ from lsst.ip.isr import CrosstalkCalib
 from lsst.pipe.tasks.maskStreaks import MaskStreaksTask
 import lsst.pipe.base as pipeBase
 import lsst.pipe.base.connectionTypes as cT
-from lsst.pex.config import Field, ListField, ConfigurableField
+from lsst.pex.config import Field, ChoiceField, ListField, ConfigurableField
 
 import mixcoatl.crosstalk as mixCrosstalk
 
@@ -108,6 +108,15 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
         dtype=float,
         default=80.,
         doc="Width of satellite streak mask."
+    )
+    backgroundModelOrder = ChoiceField(
+        dtype=int,
+        doc="2-D polynomial order for background model.",
+        default=1,
+        allowed={
+            1 : "Sloped plane background.",
+            2 : "2nd-order polynomial background."
+        }
     )
     ignoreSaturatedPixels = Field(
         dtype=bool,
@@ -250,12 +259,13 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                                                                isTrimmed=self.config.isTrimmed)
                     targetAmpArray = targetAmpImage.image.array
                     results = mixCrosstalk.crosstalk_fit(sourceAmpArray, targetAmpArray, model_select, 
-                                                         covariance=covariance, 
+                                                         covariance=covariance,
                                                          correct_covariance=self.config.correctNoiseCovariance, 
-                                                         seed=189)
+                                                         seed=189, order=self.config.backgroundModelOrder)
 
                     ## Calculate background-subtracted ratios
-                    bg = mixCrosstalk.background_model(results[1:], sourceAmpArray.shape)
+                    bg = mixCrosstalk.background_model(results[1:], sourceAmpArray.shape, 
+                                                       order=self.config.backgroundModelOrder)
                     ratios = (targetAmpArray - bg)[ratio_select]/sourceAmpArray[ratio_select]
 
                     coefficientDict[targetAmpName][sourceAmpName] = [float(results[0])]
