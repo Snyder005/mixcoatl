@@ -109,7 +109,7 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
         default=15,
         doc="High threshold for Canny edge detection."
     )
-    ratioThreshold = Field(
+    threshold = Field(
         dtype=float,
         default=10000.,
         doc="Minimum level of source pixels for which to measure ratios."
@@ -278,7 +278,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                                                          seed=189, order=self.config.backgroundModelOrder)
 
                     ## Calculate background-subtracted ratios
-                    bg = mixCrosstalk.backgroundModel(results[1:], sourceAmpArray.shape,
+                    bg = mixCrosstalk.background_model(results[1:], sourceAmpArray.shape,
                                                       order=self.config.backgroundModelOrder)
                     ratios = (targetAmpArray-bg)[ratio_select]/sourceAmpArray[ratio_select]
 
