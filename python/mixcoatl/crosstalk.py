@@ -7,7 +7,6 @@ from lsst.afw.detection import FootprintSet, Threshold
 
 def calculate_covariance(exposure, amp1, amp2):
     """Calculate read noise covariance between amplifiers.
-
     Parameters
     ----------
     exposure : `lsst.afw.image.Exposure`
@@ -16,7 +15,6 @@ def calculate_covariance(exposure, amp1, amp2):
         First amplifier to use in covariance calculation.
     amp2 : `lsst.afw.cameraGeom.Amplifier`
         Second amplifier to use in covariance calculation.
-
     Returns
     -------
     cov : `numpy.ndarray`, (2, 2)
@@ -43,7 +41,6 @@ def find_bright_columns(imarr, threshold):
         An array representing an image to analyze.
     threshold : `float`
         Pixel value threshold defining a bright column.
-
     Returns
     -------
     bright_cols : `list`
@@ -81,7 +78,6 @@ def bad_column(column_indices, threshold):
         List of column indices.
     threshold : `int`
         Number of bad pixels required to mark the column as bad.
-
     Returns
     -------
     is_bad_column : `bool`
@@ -109,7 +105,6 @@ def bad_column(column_indices, threshold):
 
 def rectangular_mask(imarr, y_center, x_center, lx, ly):
     """Make a rectangular pixel mask.
-
     Parameters
     ----------
     imarr : `numpy.ndarray`, (Ny, Nx)
@@ -122,7 +117,6 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
         Length of rectangle along X-axis.
     ly : `int`
         Length of rectangle along Y-axis.
-
     Returns
     -------
     mask : `numpy.ndarray`, (Ny, Nx)
@@ -136,7 +130,6 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
 
 def satellite_mask(imarr, angle, distance, width):
     """Make a pixel mask along a target line.
-
     Parameters
     ----------
     imarr : `numpy.ndarray`, (Ny, Nx)
@@ -147,8 +140,7 @@ def satellite_mask(imarr, angle, distance, width):
     distance : `float`
         Distance from the origin to the closest point on the target line.
     width : `float`
-        Width of the mask extending from either side of the target line.
-
+        Width of the mask.
     Returns
     -------
     mask : `numpy.ndarray`, (Ny, Nx)
@@ -156,13 +148,12 @@ def satellite_mask(imarr, angle, distance, width):
     """
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
-    select = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) < width
+    select = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) < width/2.
 
     return select
 
 def circular_mask(imarr, y_center, x_center, radius):
     """Make a circular pixel mask.
-
     Parameters
     ----------
     imarr : `numpy.ndarray`, (Ny, Nx)
@@ -173,7 +164,6 @@ def circular_mask(imarr, y_center, x_center, radius):
         X-axis position of circle center.
     radius : `float`
         Radius of the circle.
-
     Returns
     -------
     mask : `numpy.ndarray`, (Ny, Nx)
@@ -187,7 +177,6 @@ def circular_mask(imarr, y_center, x_center, radius):
 
 def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
     """Make an annular pixel mask.
-
     Parameters
     ----------
     imarr : `numpy.ndarray`, (Ny, Nx)
@@ -200,7 +189,6 @@ def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
         Inner radius of the annulus.
     outer_radius : `float`
         Outer radius of the annulus.
-
     Returns
     -------
     mask : `numpy.ndarray`, (Ny, Nx)
@@ -218,7 +206,6 @@ def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
 
 def make_streak_mask(imarr, line, width):
     """Make a pixel mask along a straight line.
-
     Parameters
     ----------
     imarr : `numpy.ndarray`, (Ny, Nx)
@@ -244,9 +231,8 @@ def make_streak_mask(imarr, line, width):
 
     return select
 
-def background_model(params, shape):
+def background_model(params, shape, order=1):
     """Create background model.
-
     Parameters
     ----------
     params : array-like, (3,)
@@ -256,26 +242,26 @@ def background_model(params, shape):
         - Constant offset.
     shape : array-like, (2,)
         Dimensions of 2-D background model pixel array.
-
     Returns
     -------
     model : `numpy.ndarray`, (shape)
         2-D background model pixel array.
     """
 
-    offset_z = params[0]
-    tilt_y = params[1]
-    tilt_x = params[2]
-
-    Ny, Nx = shape
-    Y, X = np.mgrid[:Ny, :Nx]
-    model = offset_z + tilt_y*Y + tilt_x*X
+    model = np.ones(shape)*params[0]
+    if order >= 1:
+        Ny, Nx = shape
+        Y, X = np.mgrid[:Ny, :Nx]
+        model += params[1]*Y + params[2]*X
+        if order == 2:
+            model += params[3]*Y*Y + params[4]*X*X + params[5]*X*Y
+    else:
+        raise ValueError("Order must be an integer greater than zero: {0}".format(order))
 
     return model
 
-def crosstalk_model(params, source_imarr):
+def crosstalk_model(params, source_imarr, order=1):
     """Create crosstalk target model.
-
     Parameters
     ----------
     params : array-like, (4,)
@@ -286,7 +272,6 @@ def crosstalk_model(params, source_imarr):
         - Constant offset.
     aggressor_imarr : `numpy.ndarray`, (Ny, Nx)
         2-D source image pixel array.
-
     Returns
     -------
     model : `numpy.ndarray`, (Ny, Nx)
@@ -294,19 +279,16 @@ def crosstalk_model(params, source_imarr):
     """
     ## Model parameters
     crosstalk_coeff = params[0]
-    bg = background_model(params[1:], source_imarr.shape)
+    bg = background_model(params[1:], source_imarr.shape, order=1)
 
     ## Construct model
-    Ny, Nx = source_imarr.shape
-    Y, X = np.mgrid[:Ny, :Nx]
     model = crosstalk_coeff*source_imarr + bg
     
     return model
 
 def crosstalk_fit(source_array, target_array, select, covariance,
-                  correct_covariance=False, seed=None):
+                  order=1, correct_covariance=False, seed=None):
     """Perform crosstalk target model least-squares minimization.
-
     Parameters
     ----------
     source_array: `numpy.ndarray`, (Ny, Nx)
@@ -321,7 +303,6 @@ def crosstalk_fit(source_array, target_array, select, covariance,
         Correct covariance between read noise of amplifiers.
     seed : `int`
         Seed to initialize random generator.
-
     Returns
     -------
     results : `numpy.ndarray`, (10,)
@@ -359,15 +340,22 @@ def crosstalk_fit(source_array, target_array, select, covariance,
 
     ## Construct masked, compressed basis arrays
     ay, ax = source_imarr.shape
-    Z = np.ones((ay, ax))[select]
-    Y, X = np.mgrid[:ay, :ax]
-    Y = Y[select]
-    X = X[select]
-    source_stamp = source_imarr[select]
+    bases = [source_imarr[select]]
+    bases.append(np.ones((ay, ax))[select])
+    if order >= 1:
+        Y, X = np.mgrid[:ay, :ax]
+        bases.append(Y[select])
+        bases.append(X[select])
+        if order == 2:
+            bases.append((Y*Y)[select])
+            bases.append((X*X)[select])
+            bases.append((X*Y)[select])
+    else:
+        raise ValueError("Order must be an integer greater than zero: {0}".format(order))
 
     ## Perform least squares parameter estimation
     b = target_stamp/noise
-    A = np.vstack([source_stamp, Z, Y, X]).T/noise
+    A = np.vstack(bases).T/noise
     params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
     covar = np.linalg.inv(np.dot(A.T, A))
     dof = b.shape[0] - 4
