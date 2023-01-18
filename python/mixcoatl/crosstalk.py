@@ -2,8 +2,11 @@ import copy
 import numpy as np
 from astropy.io import fits
 
+from lsst.utils.timer import timeMethod
 import lsst.afw.image as afwImage
 from lsst.afw.detection import FootprintSet, Threshold
+import lsst.pipe.base as pipeBase
+import lsst.pex.config as pexConfig
 
 def calculate_covariance(exposure, amp1, amp2):
     """Calculate read noise covariance between amplifiers.
@@ -128,30 +131,6 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
 
     return select
 
-def satellite_mask(imarr, angle, distance, width):
-    """Make a pixel mask along a target line.
-    Parameters
-    ----------
-    imarr : `numpy.ndarray`, (Ny, Nx)
-        2-D image pixel array.
-    angle : `float`
-        Angle (radians) between the X-axis and the line connecting the origin
-        to the closest point on the target line.
-    distance : `float`
-        Distance from the origin to the closest point on the target line.
-    width : `float`
-        Width of the mask.
-    Returns
-    -------
-    mask : `numpy.ndarray`, (Ny, Nx)
-        2-D mask boolean array.
-    """
-    Ny, Nx = imarr.shape
-    Y, X = np.ogrid[:Ny, :Nx]
-    select = np.abs((X*np.cos(angle) + Y*np.sin(angle)) - distance) < width/2.
-
-    return select
-
 def circular_mask(imarr, y_center, x_center, radius):
     """Make a circular pixel mask.
     Parameters
@@ -204,7 +183,7 @@ def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
 
     return select
 
-def make_streak_mask(imarr, line, width):
+def streak_mask(imarr, line, width):
     """Make a pixel mask along a straight line.
     Parameters
     ----------
@@ -222,12 +201,11 @@ def make_streak_mask(imarr, line, width):
     """
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
-    theta = line.theta*np.pi/180.
-    rho = line.rho
-    x0 = (Nx-1)/2.
-    y0 = (Ny-1)/2.
+    theta = np.deg2rad(line.theta)
+    x0 = -(Nx-1)/2.
+    y0 = -(Ny-1)/2.
     
-    select = np.abs(((X-x0)*np.cos(theta) + (Y-y0)*np.sin(theta)) - rho) < width/2.
+    select = np.abs(((X-x0)*np.cos(theta) + (Y-y0)*np.sin(theta)) - line.rho) < width/2.
 
     return select
 
@@ -285,6 +263,84 @@ def crosstalk_model(params, source_imarr, order=1):
     model = crosstalk_coeff*source_imarr + bg
     
     return model
+
+class CrosstalkModelFitConfig(pexConfig.Config):
+    
+    correctCovariance = pexConfig.Field(
+        dtype=bool,
+        default=False,
+        doc="Correct the effect of correlated read noise between amplifiers."
+    )
+    backgroundOrder = pexConfig.ChoiceField(
+        dtype=int,
+        default=1,
+        doc="2D polynomial order for background model.",
+        allowed={
+            1 : "1st-order 2D polynomial background (sloped plane).",
+            2 : "2nd-order 2D polynomial background."
+        }
+    )
+
+class CrosstalkModelFitTask(pipeBase.Task):
+
+    ConfigClass = CrosstalkModelFitConfig
+    _DefaultName = "crosstalkModelFit"
+
+    @timeMethod
+    def run(self, sourceAmpArray, targetAmpArray, sourceMask, covariance, seed=None):
+
+        noise = np.sqrt(np.trace(covariance))
+
+        if self.config.correctCovariance:
+            
+            diag = np.diag(covariance)
+            invCovariance = -1*covariance
+            np.fill_diagonal(invCovariance, diag)
+
+            rng = np.random.default_rng(seed)
+            correction = rng.multivariate_normal([0.0, 0.0], invCovariance, size=sourceAmpArray.shape)
+
+            sourceAmpArray = sourceAmpArray + correction[:, :, 0]
+            targetAmpArray = targetAmpArray + correction[:, :, 1]
+            noise *= np.sqrt(2)
+
+        targetStamp = targetAmpArray[sourceMask]
+
+        ay, ax = sourceAmpArray.shape
+        bases = [sourceAmpArray[sourceMask]]
+        bases.append(np.ones((ay, ax))[sourceMask])
+
+        if self.config.backgroundOrder >= 1:
+             
+            Y, X = np.mgrid[:ay, :ax]
+            bases.append(Y[sourceMask])
+            bases.append(X[sourceMask])
+
+            if self.config.backgroundOrder == 2:
+
+                bases.append((Y*Y)[sourceMask])
+                bases.append((X*X)[sourceMask])
+                bases.append((X*Y)[sourceMask])
+
+        b = targetStamp/noise
+        A = np.vstack(bases).T/noise
+        params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
+        covar = np.linalg.inv(np.dot(A.T, A))
+        dof = b.shape[0] - 4
+        errors = np.sqrt(covar.diagonal())
+
+        background = background_model(params[1:], sourceAmpArray.shape, order=self.config.backgroundOrder)
+
+        return pipeBase.Struct(
+            coefficient=params[0],
+            coefficientError=errors[0],
+            background=background,
+            backgroundParameters=params[1:],
+            backgroundParameterErrors=errors[1:],
+            residuals=res,
+            degreesOfFreedom=dof
+        )
+                    
 
 def crosstalk_fit(source_array, target_array, select, covariance,
                   order=1, correct_covariance=False, seed=None):
@@ -358,8 +414,14 @@ def crosstalk_fit(source_array, target_array, select, covariance,
     A = np.vstack(bases).T/noise
     params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
     covar = np.linalg.inv(np.dot(A.T, A))
+    errors = np.sqrt(covar.diagonal())
     dof = b.shape[0] - 4
-
-    results = np.concatenate((params, np.sqrt(covar.diagonal()), res, [dof]))
     
-    return results
+    return pipeBase.Struct(
+        coefficient = params[0],
+        coefficientError = errors[0],
+        backgroundParameters = params[1:],
+        backgroundParameterErrors = errors[1:],
+        residuals=res,
+        degreesOfFreedom=dof
+    )

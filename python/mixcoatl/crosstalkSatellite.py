@@ -17,6 +17,8 @@ import lsst.pipe.base.connectionTypes as cT
 from lsst.pex.config import Field, ChoiceField, ListField, ConfigurableField
 
 import mixcoatl.crosstalk as mixCrosstalk
+from mixcoatl.detectLines import DetectLinesTask
+from mixcoatl.crosstalk import CrosstalkModelFitTask
 
 class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
                                     dimensions=("instrument", "exposure", "detector")):
@@ -94,21 +96,6 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
                                pipelineConnections=CrosstalkSatelliteConnections):
     """Configuration for the measurement of pixel ratios.
     """
-    correctNoiseCovariance = Field(
-        dtype=bool,
-        default=False,
-        doc="Correct the effect of correlated read noise."
-    )
-    thresholdLow = Field(
-        dtype=float,
-        default=5,
-        doc="Low threshold for Canny edge detection."
-    )
-    thresholdHigh = Field(
-        dtype=float,
-        default=15,
-        doc="High threshold for Canny edge detection."
-    )
     threshold = Field(
         dtype=float,
         default=10000.,
@@ -118,20 +105,6 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
         dtype=float,
         default=80.,
         doc="Width of satellite streak mask."
-    )
-    backgroundModelOrder = ChoiceField(
-        dtype=int,
-        doc="2D polynomial order for background model.",
-        default=1,
-        allowed={
-            1 : "Sloped plane background.",
-            2 : "2nd-order polynomial background."
-        }
-    )
-    cannySigma = Field(
-        dtype=float,
-        doc="Gaussian smoothing sigma for Canny edge detection.", 
-        default=15.
     )
     ignoreSaturatedPixels = Field(
         dtype=bool,
@@ -147,6 +120,14 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
         dtype=bool,
         default=True,
         doc="Is the input exposure trimmed?"
+    )
+    detectStreaks = ConfigurableField(
+        target=DetectLinesTask,
+        doc="Mask streaks."
+    )
+    crosstalkSolve = ConfigurableField(
+        target=CrosstalkModelFitTask,
+        doc="Solve for crosstalk."
     )
 
     def validate(self):
@@ -166,6 +147,13 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
     """
     ConfigClass = CrosstalkSatelliteConfig
     _DefaultName = 'cpCrosstalkSatellite'
+
+    def __init__(self, **kwargs):
+
+        super().__init__(**kwargs)
+        self.makeSubtask('detectStreaks')
+        self.makeSubtask('crosstalkSolve')
+
 
     @timeMethod
     def run(self, inputExp, rawExp=None, sourceExps=[]):
@@ -220,23 +208,14 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                 sourceAmpArray = sourceAmpImage.image.array
 
                 ## Find source
-                tested_angles = np.linspace(-np.pi / 2, np.pi / 2, 1000)
-                edges = feature.canny(sourceAmpArray, sigma=self.config.cannySigma, 
-                                      low_threshold=self.config.thresholdLow, 
-                                      high_threshold=self.config.thresholdHigh)
-                h, theta, d = hough_line(edges, theta=tested_angles)
-                _, angle, dist = hough_line_peaks(h, theta, d)
-
-                if len(angle) != 2:
+                lines = self.detectStreaks.run(sourceAmpImage).lines
+                if len(lines) != 1:
                     continue
                 else:
-                    mean_angle = np.mean(angle)
-                    mean_dist = np.mean(dist)
-                sourceMask = mixCrosstalk.satellite_mask(sourceAmpArray, mean_angle, mean_dist, 
-                                                         width=self.config.maskWidth)
+                    line = lines[0]
+                sourceMask = mixCrosstalk.streak_mask(sourceAmpArray, line, self.config.maskWidth)
                 signal = sigma_clipped_stats(sourceAmpArray,
-                                             mask=~mixCrosstalk.satellite_mask(sourceAmpArray, mean_angle, 
-                                                                               mean_dist, width=0.5),
+                                             mask=~mixCrosstalk.streak_mask(sourceAmpArray, line, 0.5),
                                              cenfunc='median', stdfunc=median_absolute_deviation)[1]
                 model_select = (sourceMask & (sourceAmpMask & bad == 0)
                                 & np.isfinite(sourceAmpImage.image.array))
@@ -261,7 +240,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                     self.log.debug("    Target amplifier: %s", targetAmpName)
 
                     ## Correct noise covariance
-                    if self.config.correctNoiseCovariance and (rawExp is not None):
+                    if rawExp:
                         covariance = mixCrosstalk.calculate_covariance(rawExp, sourceAmp, targetAmp)
                     else:
                         noise = np.asarray([[sourceAmp.getReadNoise()/sourceAmp.getGain(), 0.],
@@ -272,22 +251,19 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                     targetAmpImage = CrosstalkCalib.extractAmp(targetIm, targetAmp, sourceAmp,
                                                                isTrimmed=self.config.isTrimmed)
                     targetAmpArray = targetAmpImage.image.array
-                    results = mixCrosstalk.crosstalk_fit(sourceAmpArray, targetAmpArray, model_select, 
-                                                         covariance=covariance, 
-                                                         correct_covariance=self.config.correctNoiseCovariance, 
-                                                         seed=189, order=self.config.backgroundModelOrder)
+                    results = self.crosstalkSolve.run(sourceAmpArray, targetAmpArray, model_select, 
+                                                      covariance=covariance, seed=189)
 
                     ## Calculate background-subtracted ratios
-                    bg = mixCrosstalk.background_model(results[1:], sourceAmpArray.shape,
-                                                      order=self.config.backgroundModelOrder)
+                    bg = results.background
                     ratios = (targetAmpArray-bg)[ratio_select]/sourceAmpArray[ratio_select]
 
-                    coefficientDict[targetAmpName][sourceAmpName] = [float(results[0])]
+                    coefficientDict[targetAmpName][sourceAmpName] = [float(results.coefficient)]
                     ratioDict[targetAmpName][sourceAmpName] = ratios.tolist()
-                    zoffsetDict[targetAmpName][sourceAmpName] = [float(results[1])]
-                    ytiltDict[targetAmpName][sourceAmpName] = [float(results[2])]
-                    xtiltDict[targetAmpName][sourceAmpName] = [float(results[3])]
-                    coefficientErrorDict[targetAmpName][sourceAmpName] = [float(results[4])]
+                    zoffsetDict[targetAmpName][sourceAmpName] = [float(results.backgroundParameters[0])]
+                    ytiltDict[targetAmpName][sourceAmpName] = [float(results.backgroundParameters[1])]
+                    xtiltDict[targetAmpName][sourceAmpName] = [float(results.backgroundParameters[2])]
+                    coefficientErrorDict[targetAmpName][sourceAmpName] = [float(results.coefficientError)]
                     extractedCount += count
 
             self.log.info("Extracted %d pixels from %s -> %s",
