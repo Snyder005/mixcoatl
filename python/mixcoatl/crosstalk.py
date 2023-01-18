@@ -280,6 +280,11 @@ class CrosstalkModelFitConfig(pexConfig.Config):
             2 : "2nd-order 2D polynomial background."
         }
     )
+    doNonLinearCrosstalk = pexConfig.Field(
+        dtype=bool,
+        default=False,
+        doc="Include signal-dependent crosstalk in model fit."
+    )
 
 class CrosstalkModelFitTask(pipeBase.Task):
 
@@ -305,9 +310,16 @@ class CrosstalkModelFitTask(pipeBase.Task):
             noise *= np.sqrt(2)
 
         targetStamp = targetAmpArray[sourceMask]
+        sourceStamp = sourceAmpArray[sourceMask]
 
+        if self.config.doNonLinearCrosstalk:
+            bases = [sourceStamp, np.abs(sourceStamp)*sourceStamp]
+            i = 1
+        else:
+            bases = [sourceStamp]
+            i = 0
+        
         ay, ax = sourceAmpArray.shape
-        bases = [sourceAmpArray[sourceMask]]
         bases.append(np.ones((ay, ax))[sourceMask])
 
         if self.config.backgroundOrder >= 1:
@@ -326,17 +338,31 @@ class CrosstalkModelFitTask(pipeBase.Task):
         A = np.vstack(bases).T/noise
         params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
         covar = np.linalg.inv(np.dot(A.T, A))
-        dof = b.shape[0] - 4
         errors = np.sqrt(covar.diagonal())
+        dof = b.shape[0]
 
-        background = background_model(params[1:], sourceAmpArray.shape, order=self.config.backgroundOrder)
+        c0 = params[0]
+        c0Error = errors[0]
+        if self.config.doNonLinearCrosstalk:
+            c1 = params[1]
+            c1Error = errors[1]
+            i = 1
+        else:
+            c1 = 0.0
+            c1Error = 0.0
+            i = 0
+        backgroundParameters = params[1+i:]
+        backgroundParameterErrors = errors[1+i:]
+        background = background_model(params[1+i:], sourceAmpArray.shape, order=self.config.backgroundOrder)
 
         return pipeBase.Struct(
-            coefficient=params[0],
-            coefficientError=errors[0],
+            coefficient=c0,
+            coefficientError=c0Error,
+            nonLinearCoefficient=c1,
+            nonLinearCoefficientError=c1Error,
             background=background,
-            backgroundParameters=params[1:],
-            backgroundParameterErrors=errors[1:],
+            backgroundParameters=backgroundParameters,
+            backgroundParameterErrors=backgroundParameterErrors,
             residuals=res,
             degreesOfFreedom=dof
         )
