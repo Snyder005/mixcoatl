@@ -37,9 +37,15 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
-    outputCoefficients = cT.Output(
-        name="crosstalkCoefficients",
-        doc="Crosstalk coefficients from model fit.",
+    outputLinearCoefficients = cT.Output(
+        name="crosstalkLinearCoefficients",
+        doc="Crosstalk linear coefficients from model fit.",
+        storageClass="StructuredDataDict",
+        dimensions=("instrument", "exposure", "detector"),
+    )
+    outputNonLinearCoefficients = cT.Output(
+        name="crosstalkNonLinearCoefficients",
+        doc="Crosstalk first-order nonlinear coefficients from model fit.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
@@ -158,7 +164,8 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
     @timeMethod
     def run(self, inputExp, rawExp=None, sourceExps=[]):
 
-        outputCoefficients = defaultdict(lambda: defaultdict(dict))
+        outputLinearCoefficients = defaultdict(lambda: defaultdict(dict))
+        outputNonLinearCoefficients = defaultdict(lambda: defaultdict(dict))
         outputSignals = defaultdict(lambda: defaultdict(dict))
         outputRatios = defaultdict(lambda: defaultdict(dict))
         outputFluxes = defaultdict(lambda: defaultdict(dict))
@@ -192,7 +199,8 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                 FootprintSet(sourceIm, Threshold(threshold), "DETECTED")
                 detected = sourceIm.getMask().getPlaneBitMask("DETECTED")            
 
-            coefficientDict = defaultdict(lambda: defaultdict(list))
+            linearCoefficientDict = defaultdict(lambda: defaultdict(list))
+            nonLinearCoefficientDict = defaultdict(lambda: defaultdict(list))
             ratioDict = defaultdict(lambda: defaultdict(list))
             zoffsetDict = defaultdict(lambda: defaultdict(list))
             ytiltDict = defaultdict(lambda: defaultdict(list))
@@ -230,7 +238,8 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                     # iterate over targetExposure
                     targetAmpName = targetAmp.getName()
                     if sourceAmpName == targetAmpName and sourceChip == targetChip:
-                        coefficientDict[sourceAmpName][targetAmpName] = []
+                        linearCoefficientDict[sourceAmpName][targetAmpName] = []
+                        nonLinearCoefficientDict[sourceAmpName][targetAmpName] = []
                         ratioDict[sourceAmpName][targetAmpName] = []
                         zoffsetDict[targetAmpName][sourceAmpName] = []
                         ytiltDict[targetAmpName][sourceAmpName] = []
@@ -258,7 +267,8 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                     bg = results.background
                     ratios = (targetAmpArray-bg)[ratio_select]/sourceAmpArray[ratio_select]
 
-                    coefficientDict[targetAmpName][sourceAmpName] = [float(results.coefficient)]
+                    linearCoefficientDict[targetAmpName][sourceAmpName] = [float(results.coefficient)]
+                    nonLinearCoefficientDict[targetAmpName][sourceAmpName] = [float(results.nonLinearCoefficient)]
                     ratioDict[targetAmpName][sourceAmpName] = ratios.tolist()
                     zoffsetDict[targetAmpName][sourceAmpName] = [float(results.backgroundParameters[0])]
                     ytiltDict[targetAmpName][sourceAmpName] = [float(results.backgroundParameters[1])]
@@ -268,7 +278,8 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
 
             self.log.info("Extracted %d pixels from %s -> %s",
                           extractedCount, sourceChip, targetChip)
-            outputCoefficients[targetChip][sourceChip] = coefficientDict
+            outputLinearCoefficients[targetChip][sourceChip] = linearCoefficientDict
+            outputNonLinearCoefficients[targetChip][sourceChip] = nonLinearCoefficientDict
             outputRatios[targetChip][sourceChip] = ratioDict
             outputZOffsets[targetChip][sourceChip] = zoffsetDict
             outputYTilts[targetChip][sourceChip] = ytiltDict
@@ -276,7 +287,8 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
             outputCoefficientErrors[targetChip][sourceChip] = coefficientErrorDict
 
         return pipeBase.Struct(
-            outputCoefficients=ddict2dict(outputCoefficients),
+            outputLinearCoefficients=ddict2dict(outputLinearCoefficients),
+            outputNonLinearCoefficients=ddict2dict(outputNonLinearCoefficients),
             outputSignals=ddict2dict(outputSignals),
             outputRatios=ddict2dict(outputRatios),
             outputFluxes=ddict2dict(outputFluxes),
