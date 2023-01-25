@@ -7,8 +7,13 @@ import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
 from lsst.pipe.tasks.maskStreaks import LineCollection
 
-class DetectLinesConfig(pexConfig.Config):
+class DetectStreaksConfig(pexConfig.Config):
 
+    maskWidth = pexConfig.Field(
+        dtype=float,
+        default=80.,
+        doc="Width of streak mask."
+    )
     sigma = pexConfig.Field(
         dtype=float,
         default=15.,
@@ -25,10 +30,10 @@ class DetectLinesConfig(pexConfig.Config):
         doc="Upper bound for hysteresis thresholding (linking edges)."
     )
     
-class DetectLinesTask(pipeBase.Task):
+class DetectStreaksTask(pipeBase.Task):
     
-    ConfigClass = DetectLinesConfig
-    _DefaultName = "detectLines"
+    ConfigClass = DetectStreaksConfig
+    _DefaultName = "detectStreaks"
 
     @timeMethod
     def run(self, maskedImage):
@@ -42,17 +47,20 @@ class DetectLinesTask(pipeBase.Task):
         accum, angles, dists = hough_line_peaks(h, theta, d)
 
         if len(angles) != 2:
-            lines = LineCollection([], [])
-        else:
-            dist = np.mean(dists)
-            angle = np.mean(angles)
+            raise RuntimeError("No crosstalk source detected.")
 
-            Ny, Nx = imarr.shape
-            x0 = (Nx - 1)/2.
-            y0 = (Ny - 1)/2.
-            theta = np.rad2deg(angle)
-            rho = dist + x0*np.cos(angle) + y0*np.sin(angle)
+        dist = np.mean(dists)
+        angle = np.mean(angles)
+        theta = np.rad2deg(angle)
+        rho = dist + x0*np.cos(angle) + y0*np.sin(angle)
+        
+        line = Line(rho, theta)
+        sourceMask = mixCrosstalk.streak_mask(imarr, line, self.config.maskWidth)
+        signal = sigma_clipped_stats(imarr,
+                                     mask=~mixCrosstalk.streak_mask(imarr, line, 1.0),
+                                     cenfunc='median', stdfunc=median_absolute_deviation)[1]
 
-            lines = LineCollection([rho], [theta])
-
-        return pipeBase.Struct(lines=lines)
+        return pipeBase.Struct(
+            signal=signal,
+            sourceMask=sourceMask
+        )
