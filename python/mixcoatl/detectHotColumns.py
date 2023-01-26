@@ -1,11 +1,12 @@
 import numpy as np
-from skimage import feature
-from skimage.transform import hough_line, hough_line_peaks
+from astropy.stats import median_absolute_deviation, sigma_clipped_stats
 
 from lsst.utils.timer import timeMethod
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
-from lsst.pipe.tasks.maskStreaks import LineCollection
+from lsst.afw.detection import FootprintSet, Threshold
+
+import mixcoatl.crosstalk as mixCrosstalk
 
 class DetectHotColumnsConfig(pexConfig.Config):
 

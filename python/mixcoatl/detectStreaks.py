@@ -1,11 +1,14 @@
 import numpy as np
 from skimage import feature
 from skimage.transform import hough_line, hough_line_peaks
+from astropy.stats import median_absolute_deviation, sigma_clipped_stats
 
 from lsst.utils.timer import timeMethod
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
-from lsst.pipe.tasks.maskStreaks import LineCollection
+from lsst.pipe.tasks.maskStreaks import Line
+
+import mixcoatl.crosstalk as mixCrosstalk
 
 class DetectStreaksConfig(pexConfig.Config):
 
@@ -51,6 +54,10 @@ class DetectStreaksTask(pipeBase.Task):
 
         dist = np.mean(dists)
         angle = np.mean(angles)
+        
+        Ny, Nx = imarr.shape
+        x0 = (Nx-1)/2.
+        y0 = (Ny-1)/2.
         theta = np.rad2deg(angle)
         rho = dist + x0*np.cos(angle) + y0*np.sin(angle)
         

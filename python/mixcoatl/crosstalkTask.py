@@ -97,18 +97,13 @@ class CrosstalkTaskConnections(pipeBase.PipelineTaskConnections,
             self.prerequisiteInputs.discard("rawExp")
 
 class CrosstalkTaskConfig(pipeBase.PipelineTaskConfig,
-                          pipelineConnections=CrosstalkSatelliteConnections):
+                          pipelineConnections=CrosstalkTaskConnections):
     """Configuration for the measurement of pixel ratios.
     """
     threshold = Field(
         dtype=float,
         default=10000.,
         doc="Minimum level of source pixels for which to measure ratios."
-    )
-    maskWidth = Field(
-        dtype=float,
-        default=80.,
-        doc="Width of satellite streak mask."
     )
     ignoreSaturatedPixels = Field(
         dtype=bool,
@@ -139,7 +134,7 @@ class CrosstalkTaskConfig(pipeBase.PipelineTaskConfig,
         doc="Detect streaks as crosstalk sources."
     )
     detectSpots = ConfigurableField(
-        target=DetectSpotsTasks,
+        target=DetectSpotsTask,
         doc="Detect spots as crosstalk sources."
     )
     crosstalkSolve = ConfigurableField(
@@ -225,7 +220,7 @@ class CrosstalkTask(pipeBase.PipelineTask):
                 sourceAmpImage = sourceIm[sourceAmpBBox]
                 sourceAmpMask = sourceAmpImage.mask.array
                 sourceAmpArray = sourceAmpImage.image.array
-
+                
                 ## Find source
                 try:
                     if self.config.sourceType == 'streak':
@@ -260,7 +255,7 @@ class CrosstalkTask(pipeBase.PipelineTask):
                         coefficientErrorDict[targetAmpName][sourceAmpName] = []
                         continue
                     self.log.debug("    Target amplifier: %s", targetAmpName)
-
+                    
                     ## Correct noise covariance
                     if rawExp:
                         covariance = mixCrosstalk.calculate_covariance(rawExp, sourceAmp, targetAmp)

@@ -1,35 +1,36 @@
 import numpy as np
-from skimage import feature
-from skimage.transform import hough_line, hough_line_peaks
+from scipy.ndimage.filters import gaussian_filter
+from astropy.stats import median_absolute_deviation, sigma_clipped_stats
 
 from lsst.utils.timer import timeMethod
 import lsst.pex.config as pexConfig
 import lsst.pipe.base as pipeBase
-from lsst.pipe.tasks.maskStreaks import LineCollection
+
+import mixcoatl.crosstalk as mixCrosstalk
 
 class DetectSpotsConfig(pexConfig.Config):
 
-    threshold = Field(
+    threshold = pexConfig.Field(
         dtype=float,
         default=30000.,
         doc="Minimum mean value of crosstalk source."
     )
-    maskLength = Field(
+    maskLength = pexConfig.Field(
         dtype=float,
         default=250.,
         doc="Length of side of square mask."
     )
-    doAnnularCutout = Field(
+    doAnnularCutout = pexConfig.Field(
         dtype=bool,
         default=False,
         doc="Mask an annular cutout of the square mask."
     )
-    annulusInnerRadius = Field(
+    annulusInnerRadius = pexConfig.Field(
         dtype=float,
         default=40.,
         doc="Inner radius of annulur mask used for cutout."
     )
-    annulusOuterRadius = Field(
+    annulusOuterRadius = pexConfig.Field(
         dtype=float,
         default=100.,
         doc="Outer radius of annulur mask used for cutout."
@@ -55,10 +56,10 @@ class DetectSpotsTask(pipeBase.Task):
             raise RuntimeError("No crosstalk source detected.")
 
         sourceMask = mixCrosstalk.rectangular_mask(imarr, y, x, ly=self.config.maskLength, 
-                                                   lx=self.config.MaskLength)
+                                                   lx=self.config.maskLength)
         
         if self.config.doAnnularCutout:
-            cutout = ~mixCrosstalk.annularMask(imarr, y, x,
+            cutout = ~mixCrosstalk.annular_mask(imarr, y, x,
                                                inner_radius=self.config.annulusInnerRadius,
                                                outer_radius=self.config.annulusOuterRadius)
             sourceMask = sourceMask*cutout
