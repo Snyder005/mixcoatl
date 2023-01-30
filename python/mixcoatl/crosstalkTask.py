@@ -1,8 +1,5 @@
 import numpy as np
-from astropy.stats import median_absolute_deviation, sigma_clipped_stats
 from collections import defaultdict
-from skimage import feature
-from skimage.transform import hough_line, hough_line_peaks
 
 from lsst.utils.timer import timeMethod
 from lsstDebug import getDebugFrame
@@ -17,11 +14,12 @@ import lsst.pipe.base.connectionTypes as cT
 from lsst.pex.config import Field, ChoiceField, ListField, ConfigurableField
 
 import mixcoatl.crosstalk as mixCrosstalk
-from mixcoatl.detectLines import DetectLinesTask
+from mixcoatl.detectStreaks import DetectStreaksTask
+from mixcoatl.detectSpots import DetectSpotsTask
 from mixcoatl.crosstalk import CrosstalkModelFitTask
 
-class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
-                                    dimensions=("instrument", "exposure", "detector")):
+class CrosstalkTaskConnections(pipeBase.PipelineTaskConnections,
+                               dimensions=("instrument", "exposure", "detector")):
 
     inputExp = cT.Input(
         name="crosstalkInputs",
@@ -37,8 +35,8 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
-    outputLinearCoefficients = cT.Output(
-        name="crosstalkLinearCoefficients",
+    outputCoefficients = cT.Output(
+        name="crosstalkCoefficients",
         doc="Crosstalk linear coefficients from model fit.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
@@ -92,25 +90,14 @@ class CrosstalkSatelliteConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         )
 
-    def __init__(self, *, config=None):
-        super().__init__(config=config)
-
-        if config.correctNoiseCovariance is not True:
-            self.prerequisiteInputs.discard("rawExp")
-
-class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
-                               pipelineConnections=CrosstalkSatelliteConnections):
+class CrosstalkTaskConfig(pipeBase.PipelineTaskConfig,
+                          pipelineConnections=CrosstalkTaskConnections):
     """Configuration for the measurement of pixel ratios.
     """
     threshold = Field(
         dtype=float,
         default=10000.,
         doc="Minimum level of source pixels for which to measure ratios."
-    )
-    maskWidth = Field(
-        dtype=float,
-        default=80.,
-        doc="Width of satellite streak mask."
     )
     ignoreSaturatedPixels = Field(
         dtype=bool,
@@ -127,9 +114,22 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
         default=True,
         doc="Is the input exposure trimmed?"
     )
+    sourceType = ChoiceField(
+        dtype=str,
+        default="streak",
+        doc="Type of crosstalk source.",
+        allowed={
+            "streak" : "Streak as a crosstalk source.",
+            "spot" : "Large spot as a crosstalk source."
+        }
+    )
     detectStreaks = ConfigurableField(
-        target=DetectLinesTask,
-        doc="Mask streaks."
+        target=DetectStreaksTask,
+        doc="Detect streaks as crosstalk sources."
+    )
+    detectSpots = ConfigurableField(
+        target=DetectSpotsTask,
+        doc="Detect spots as crosstalk sources."
     )
     crosstalkSolve = ConfigurableField(
         target=CrosstalkModelFitTask,
@@ -148,23 +148,23 @@ class CrosstalkSatelliteConfig(pipeBase.PipelineTaskConfig,
             if 'SAT' in self.badMask:
                 self.badMask = [mask for mask in self.badMask if mask != 'SAT']
 
-class CrosstalkSatelliteTask(pipeBase.PipelineTask):
+class CrosstalkTask(pipeBase.PipelineTask):
     """Task to measure pixel ratios to find crosstalk.
     """
-    ConfigClass = CrosstalkSatelliteConfig
-    _DefaultName = 'cpCrosstalkSatellite'
+    ConfigClass = CrosstalkTaskConfig
+    _DefaultName = 'cpCrosstalk'
 
     def __init__(self, **kwargs):
 
         super().__init__(**kwargs)
         self.makeSubtask('detectStreaks')
+        self.makeSubtask('detectSpots')
         self.makeSubtask('crosstalkSolve')
-
 
     @timeMethod
     def run(self, inputExp, rawExp=None, sourceExps=[]):
 
-        outputLinearCoefficients = defaultdict(lambda: defaultdict(dict))
+        outputCoefficients = defaultdict(lambda: defaultdict(dict))
         outputNonLinearCoefficients = defaultdict(lambda: defaultdict(dict))
         outputSignals = defaultdict(lambda: defaultdict(dict))
         outputRatios = defaultdict(lambda: defaultdict(dict))
@@ -199,7 +199,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                 FootprintSet(sourceIm, Threshold(threshold), "DETECTED")
                 detected = sourceIm.getMask().getPlaneBitMask("DETECTED")            
 
-            linearCoefficientDict = defaultdict(lambda: defaultdict(list))
+            coefficientDict = defaultdict(lambda: defaultdict(list))
             nonLinearCoefficientDict = defaultdict(lambda: defaultdict(list))
             ratioDict = defaultdict(lambda: defaultdict(list))
             zoffsetDict = defaultdict(lambda: defaultdict(list))
@@ -214,17 +214,19 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                 sourceAmpImage = sourceIm[sourceAmpBBox]
                 sourceAmpMask = sourceAmpImage.mask.array
                 sourceAmpArray = sourceAmpImage.image.array
-
+                
                 ## Find source
-                lines = self.detectStreaks.run(sourceAmpImage).lines
-                if len(lines) != 1:
+                try:
+                    if self.config.sourceType == 'streak':
+                        detectedSourceResults = self.detectStreaks.run(sourceAmpImage)
+                    elif self.config.sourceType == 'spot':
+                        detectedSourceResults = self.detectSpots.run(sourceAmpImage)
+                except RuntimeError:
                     continue
-                else:
-                    line = lines[0]
-                sourceMask = mixCrosstalk.streak_mask(sourceAmpArray, line, self.config.maskWidth)
-                signal = sigma_clipped_stats(sourceAmpArray,
-                                             mask=~mixCrosstalk.streak_mask(sourceAmpArray, line, 0.5),
-                                             cenfunc='median', stdfunc=median_absolute_deviation)[1]
+
+                sourceMask = detectedSourceResults.sourceMask
+                signal = detectedSourceResults.signal
+            
                 model_select = (sourceMask & (sourceAmpMask & bad == 0)
                                 & np.isfinite(sourceAmpImage.image.array))
                 ratio_select = (model_select & (sourceAmpMask & detected > 0))
@@ -238,7 +240,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                     # iterate over targetExposure
                     targetAmpName = targetAmp.getName()
                     if sourceAmpName == targetAmpName and sourceChip == targetChip:
-                        linearCoefficientDict[sourceAmpName][targetAmpName] = []
+                        coefficientDict[sourceAmpName][targetAmpName] = []
                         nonLinearCoefficientDict[sourceAmpName][targetAmpName] = []
                         ratioDict[sourceAmpName][targetAmpName] = []
                         zoffsetDict[targetAmpName][sourceAmpName] = []
@@ -247,7 +249,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                         coefficientErrorDict[targetAmpName][sourceAmpName] = []
                         continue
                     self.log.debug("    Target amplifier: %s", targetAmpName)
-
+                    
                     ## Correct noise covariance
                     if rawExp:
                         covariance = mixCrosstalk.calculate_covariance(rawExp, sourceAmp, targetAmp)
@@ -267,7 +269,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
                     bg = results.background
                     ratios = (targetAmpArray-bg)[ratio_select]/sourceAmpArray[ratio_select]
 
-                    linearCoefficientDict[targetAmpName][sourceAmpName] = [float(results.coefficient)]
+                    coefficientDict[targetAmpName][sourceAmpName] = [float(results.coefficient)]
                     nonLinearCoefficientDict[targetAmpName][sourceAmpName] = [float(results.nonLinearCoefficient)]
                     ratioDict[targetAmpName][sourceAmpName] = ratios.tolist()
                     zoffsetDict[targetAmpName][sourceAmpName] = [float(results.backgroundParameters[0])]
@@ -278,7 +280,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
 
             self.log.info("Extracted %d pixels from %s -> %s",
                           extractedCount, sourceChip, targetChip)
-            outputLinearCoefficients[targetChip][sourceChip] = linearCoefficientDict
+            outputCoefficients[targetChip][sourceChip] = coefficientDict
             outputNonLinearCoefficients[targetChip][sourceChip] = nonLinearCoefficientDict
             outputRatios[targetChip][sourceChip] = ratioDict
             outputZOffsets[targetChip][sourceChip] = zoffsetDict
@@ -287,7 +289,7 @@ class CrosstalkSatelliteTask(pipeBase.PipelineTask):
             outputCoefficientErrors[targetChip][sourceChip] = coefficientErrorDict
 
         return pipeBase.Struct(
-            outputLinearCoefficients=ddict2dict(outputLinearCoefficients),
+            outputCoefficients=ddict2dict(outputCoefficients),
             outputNonLinearCoefficients=ddict2dict(outputNonLinearCoefficients),
             outputSignals=ddict2dict(outputSignals),
             outputRatios=ddict2dict(outputRatios),

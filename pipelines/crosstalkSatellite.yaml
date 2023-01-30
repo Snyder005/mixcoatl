@@ -21,9 +21,13 @@ tasks:
       doFringe: False
       doOverscan: True
       overscan.fitType: 'MEDIAN_PER_ROW'
-  crosstalkSatellite:
-    class: mixcoatl.crosstalkSatellite.CrosstalkSatelliteTask
+  crosstalkTask:
+    class: mixcoatl.crosstalkTask.CrosstalkTask
     config:
       connections.inputExp: 'cpCrosstalkProc'
       connections.rawExp: 'raw'
-      correctNoiseCovariance: True
+      sourceType: 'streak'
+      detectStreaks.maskWidth: 80.
+      crosstalkSolve.correctCovariance: True
+      crosstalkSolve.backgroundOrder: 2
+      crosstalkSolve.doNonLinearCrosstalk: True
