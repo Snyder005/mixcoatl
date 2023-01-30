@@ -21,18 +21,17 @@ tasks:
       doFringe: False
       doOverscan: True
       overscan.fitType: 'MEDIAN_PER_ROW'
-  crosstalkSpot:
-    class: mixcoatl.crosstalkTask.CrosstalkSpotTask
+  crosstalkTask:
+    class: mixcoatl.crosstalkTask.CrosstalkTask
     config:
       connections.inputExp: 'cpCrosstalkProc'
       connections.rawExp: 'raw'
-      doAnnularCutout: True
-      annulusInnerRadius: 40.
-      annulusOuterRadius: 100.
-      maskLength: 250.
-      maskRadius: 10.
-      correctNoiseCovariance: True
-      sourceThreshold: 5000
+      sourceType: 'spot'
+      detectSpots.threshold: 5000.
+      detectSpots.maskLength: 250.
+      crosstalkSolve.correctCovariance: True
+      crosstalkSolve.backgroundOrder: 2
+      crosstalkSolve.doNonLinearCrosstalk: True
   crosstalkSolve:
     class: lsst.cp.pipe.CrosstalkSolveTask
     config:
