@@ -35,77 +35,6 @@ def calculate_covariance(exposure, amp1, amp2):
 
     return cov
 
-def find_bright_columns(imarr, threshold):
-    """Find bright columns in an image array.
-    
-    Parameters
-    ----------
-    imarr : `numpy.ndarrawy`, (Nx, Ny)
-        An array representing an image to analyze.
-    threshold : `float`
-        Pixel value threshold defining a bright column.
-    Returns
-    -------
-    bright_cols : `list`
-        List of column indices corresponding to bright columns.
-    """
-    image = afwImage.ImageF(imarr)
-    
-    fp_set = FootprintSet(image, Threshold(threshold))    
-    columns = dict([(x, []) for x in range(0, image.getWidth())])
-    for footprint in fp_set.getFootprints():
-        for span in footprint.getSpans():
-            y = span.getY()
-            for x in range(span.getX0(), span.getX1()+1):
-                columns[x].append(y)
-                
-    bright_cols = []
-    x0 = image.getX0()
-    y0 = image.getY0()
-    for x in columns:
-        if bad_column(columns[x], 20):
-            bright_cols.append(x - x0)
-    #
-    # Sort the output.
-    #
-    bright_cols.sort()
-    
-    return bright_cols
-
-def bad_column(column_indices, threshold):
-    """Identify bad columns by number of masked pixels.
-    
-    Parameters
-    ----------
-    column_indices : `list`
-        List of column indices.
-    threshold : `int`
-        Number of bad pixels required to mark the column as bad.
-    Returns
-    -------
-    is_bad_column : `bool`
-        `True` if column is bad, `False` if not.
-    """
-    if len(column_indices) < threshold:
-        # There are not enough masked pixels to mark this as a bad
-        # column.
-        return False
-    # Fill an array with zeros, then fill with ones at mask locations.
-    column = np.zeros(max(column_indices) + 1)
-    column[(column_indices,)] = 1
-    # Count pixels in contiguous masked sequences.
-    masked_pixel_count = []
-    last = 0
-    for value in column:
-        if value != 0 and last == 0:
-            masked_pixel_count.append(1)
-        elif value != 0 and last != 0:
-            masked_pixel_count[-1] += 1
-        last = value
-    if len(masked_pixel_count) > 0 and max(masked_pixel_count) >= threshold:
-        return True
-    return False
-
 def rectangular_mask(imarr, y_center, x_center, lx, ly):
     """Make a rectangular pixel mask.
     Parameters
@@ -312,57 +241,65 @@ class CrosstalkModelFitTask(pipeBase.Task):
         targetStamp = targetAmpArray[sourceMask]
         sourceStamp = sourceAmpArray[sourceMask]
 
+        crosstalkVectors = [sourceStamp]
         if self.config.doNonLinearCrosstalk:
-            bases = [sourceStamp, np.abs(sourceStamp)*sourceStamp]
-            i = 1
-        else:
-            bases = [sourceStamp]
-            i = 0
+            crosstalkVectors.append(np.abs(sourceStamp)*sourceStamp)
         
+        ## Construct background polynomials
         ay, ax = sourceAmpArray.shape
-        bases.append(np.ones((ay, ax))[sourceMask])
+        backgroundVectors = [np.ones((ay, ax))[sourceMask]]
 
         if self.config.backgroundOrder >= 1:
              
             Y, X = np.mgrid[:ay, :ax]
-            bases.append(Y[sourceMask])
-            bases.append(X[sourceMask])
+            backgroundVectors.append(Y[sourceMask])
+            backgroundVectors.append(X[sourceMask])
 
             if self.config.backgroundOrder == 2:
 
-                bases.append((Y*Y)[sourceMask])
-                bases.append((X*X)[sourceMask])
-                bases.append((X*Y)[sourceMask])
+                backgroundVectors.append((Y*Y)[sourceMask])
+                backgroundVectors.append((X*X)[sourceMask])
+                backgroundVectors.append((X*Y)[sourceMask])
 
+        ## Perform least squares fit
         b = targetStamp/noise
-        A = np.vstack(bases).T/noise
+        A = np.vstack(crosstalkBases + bgBases).T/noise
         params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
         covar = np.linalg.inv(np.dot(A.T, A))
         errors = np.sqrt(covar.diagonal())
         dof = b.shape[0]
 
-        c0 = params[0]
-        c0Error = errors[0]
+        crosstalkParams, bgParams = np.split(params, len(crosstalkVectors))
+        crosstalkErrors, bgErrors = np.split(errors, len(crosstalkVectors))
+
+        ## Assign crosstalk results
+        crosstalkResults = {'c0' : crosstalkParams[0], 
+                            'c0Error' : crosstalkErrors[0]}
         if self.config.doNonLinearCrosstalk:
-            c1 = params[1]
-            c1Error = errors[1]
-            i = 1
-        else:
-            c1 = 0.0
-            c1Error = 0.0
-            i = 0
-        backgroundParameters = params[1+i:]
-        backgroundParameterErrors = errors[1+i:]
-        background = background_model(params[1+i:], sourceAmpArray.shape, order=self.config.backgroundOrder)
+            crosstalkResults.update({'c1' : crosstalkParams[1],
+                                     'c1Error' : crosstalkErrors[1]})
+
+        ## Assign background results
+        backgroundResults = {'b00' : bgParams[0],
+                             'b00Error' : bgErrors}
+        if self.config.backgroundOrder >= 1:
+            backgroundResults.update({'b01' : bgParams[1],
+                                      'b10' : bgParams[2],
+                                      'b01Error' : bgErrors[1],
+                                      'b10Error' : bgErrors[2]})
+        if self.config.backgroundOrder == 2: 
+            backgroundResults.update({'b02' : bgParams[3],
+                                      'b20' : bgParams[4],
+                                      'b11' : bgParams[5],
+                                      'b02Error' : bgErrors[3],
+                                      'b20Error' : bgErrors[4],
+                                      'b11Error' : bgErrors[5]})
+        background = background_model(bgParams, sourceAmpArray.shape, order=self.config.backgroundOrder)
 
         return pipeBase.Struct(
-            coefficient=c0,
-            coefficientError=c0Error,
-            nonLinearCoefficient=c1,
-            nonLinearCoefficientError=c1Error,
+            crosstalkResults=crosstalkResults
+            backgroundResults=backgroundResults
             background=background,
-            backgroundParameters=backgroundParameters,
-            backgroundParameterErrors=backgroundParameterErrors,
             residuals=res,
             degreesOfFreedom=dof
         )
