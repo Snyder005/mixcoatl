@@ -283,7 +283,7 @@ class CrosstalkModelFitTask(pipeBase.Task):
 
         ## Assign background results
         backgroundResults = {'b00' : bgParams[0],
-                             'b00Error' : bgErrors}
+                             'b00Error' : bgErrors[0]}
         if self.config.backgroundOrder >= 1:
             backgroundResults.update({'b01' : bgParams[1],
                                       'b10' : bgParams[2],
