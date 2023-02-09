@@ -263,14 +263,14 @@ class CrosstalkModelFitTask(pipeBase.Task):
 
         ## Perform least squares fit
         b = targetStamp/noise
-        A = np.vstack(crosstalkBases + bgBases).T/noise
+        A = np.vstack(crosstalkVectors + backgroundVectors).T/noise
         params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
         covar = np.linalg.inv(np.dot(A.T, A))
         errors = np.sqrt(covar.diagonal())
         dof = b.shape[0]
 
-        crosstalkParams, bgParams = np.split(params, len(crosstalkVectors))
-        crosstalkErrors, bgErrors = np.split(errors, len(crosstalkVectors))
+        crosstalkParams, bgParams = np.split(params, [len(crosstalkVectors)])
+        crosstalkErrors, bgErrors = np.split(errors, [len(crosstalkVectors)])
 
         ## Assign crosstalk results
         crosstalkResults = {'c0' : crosstalkParams[0], 
@@ -297,8 +297,8 @@ class CrosstalkModelFitTask(pipeBase.Task):
         background = background_model(bgParams, sourceAmpArray.shape, order=self.config.backgroundOrder)
 
         return pipeBase.Struct(
-            crosstalkResults=crosstalkResults
-            backgroundResults=backgroundResults
+            crosstalkResults=crosstalkResults,
+            backgroundResults=backgroundResults,
             background=background,
             residuals=res,
             degreesOfFreedom=dof
