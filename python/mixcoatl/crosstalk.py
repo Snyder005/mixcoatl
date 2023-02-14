@@ -142,11 +142,21 @@ def background_model(params, shape):
     """Create background model.
     Parameters
     ----------
-    params : array-like, (3,)
-        Input background model parameters:
-        - Y-axis tilt.
-        - X-axis tilt.
-        - Constant offset.
+    params : `dict`
+        Background model parameters dictionary with keys:
+
+        `"b00"`
+            Constant offset term (`float`).
+        `"b01"`
+            First order y term (`float`).
+        `"b10"`
+            First order x term (`float`).
+        `"b02"`
+            Second order y term (`float`).
+        `"b20"`
+            Second order x term (`float`).
+        `b11"`
+            Second order xy term (`float`).
     shape : array-like, (2,)
         Dimensions of 2-D background model pixel array.
     Returns
@@ -168,17 +178,33 @@ def background_model(params, shape):
 
     return model
 
-def crosstalk_model(crosstalk_params, background_params, source_imarr, order=1):
+def crosstalk_model(crosstalk_params, background_params, source_imarr):
     """Create crosstalk target model.
     Parameters
     ----------
-    params : array-like, (4,)
-        Input target model parameters:
-        - crosstalk coefficient.
-        - Y-axis tilt.
-        - X-axis tilt.
-        - Constant offset.
-    aggressor_imarr : `numpy.ndarray`, (Ny, Nx)
+    crosstalk_params: `dict`
+        Crosstalk model parameters dictionary with keys:
+        
+        `"c0"`
+            First order crosstalk term (`float`).
+        `"c1"`
+            Second order crosstalk term (`float`).
+    background_params : `dict`
+        Background model parameters dictionary with keys:
+
+        `"b00"`
+            Constant offset term (`float`).
+        `"b01"`
+            First order y term (`float`).
+        `"b10"`
+            First order x term (`float`).
+        `"b02"`
+            Second order y term (`float`).
+        `"b20"`
+            Second order x term (`float`).
+        `b11"`
+            Second order xy term (`float`).
+    source_imarr : `numpy.ndarray`, (Ny, Nx)
         2-D source image pixel array.
     Returns
     -------
@@ -188,7 +214,7 @@ def crosstalk_model(crosstalk_params, background_params, source_imarr, order=1):
     ## Model parameters
     c0 = crosstalk_params['c0']
     c1 = crosstalk_params.get('c1', 0.0)
-    bg = background_model(background_params, source_imarr.shape, order=1)
+    bg = background_model(background_params, source_imarr.shape)
 
     ## Construct model
     model = (c0*source_imarr) + (c1*np.abs(source_imarr)*source_imarr) + bg
