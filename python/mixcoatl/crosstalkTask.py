@@ -35,15 +35,15 @@ class CrosstalkTaskConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
         multiple=False,
     )
-    outputCoefficients = cT.Output(
-        name="crosstalkCoefficients",
-        doc="Crosstalk linear coefficients from model fit.",
+    outputCrosstalkResults = cT.Output(
+        name="crosstalkResults",
+        doc="Crosstalk coefficient and error results from model fit.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
-    outputNonLinearCoefficients = cT.Output(
-        name="crosstalkNonLinearCoefficients",
-        doc="Crosstalk first-order nonlinear coefficients from model fit.",
+    outputBackgroundResults = cT.Output(
+        name="backgroundResults",
+        doc="Background coefficient and error results from model fit.",
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
@@ -65,30 +65,6 @@ class CrosstalkTaskConnections(pipeBase.PipelineTaskConnections,
         storageClass="StructuredDataDict",
         dimensions=("instrument", "exposure", "detector"),
     )
-    outputZOffsets = cT.Output(
-        name="crosstalkBackgroundZOffsets",
-        doc="Z offset parameters used in background model.",
-        storageClass="StructuredDataDict",
-        dimensions=("instrument", "exposure", "detector"),
-    )
-    outputYTilts = cT.Output(
-        name="crosstalkBackgroundYTilts",
-        doc="Y tilt parameters used in background model.",
-        storageClass="StructuredDataDict",
-        dimensions=("instrument", "exposure", "detector"),
-    )
-    outputXTilts = cT.Output(
-        name="crosstalkBackgroundXTilts",
-        doc="X tilt parameters used in background model.",
-        storageClass="StructuredDataDict",
-        dimensions=("instrument", "exposure", "detector"),
-    )
-    outputCoefficientErrors = cT.Output(
-        name="crosstalkCoefficientErrors",
-        doc="Standard error of the crosstalk coefficients.",
-        storageClass="StructuredDataDict",
-        dimensions=("instrument", "exposure", "detector"),
-        )
 
 class CrosstalkTaskConfig(pipeBase.PipelineTaskConfig,
                           pipelineConnections=CrosstalkTaskConnections):
@@ -164,15 +140,11 @@ class CrosstalkTask(pipeBase.PipelineTask):
     @timeMethod
     def run(self, inputExp, rawExp=None, sourceExps=[]):
 
-        outputCoefficients = defaultdict(lambda: defaultdict(dict))
-        outputNonLinearCoefficients = defaultdict(lambda: defaultdict(dict))
+        outputCrosstalkResults = defaultdict(lambda: defaultdict(dict))
+        outputBackgroundResults = defaultdict(lambda: defaultdict(dict))
         outputSignals = defaultdict(lambda: defaultdict(dict))
         outputRatios = defaultdict(lambda: defaultdict(dict))
         outputFluxes = defaultdict(lambda: defaultdict(dict))
-        outputZOffsets = defaultdict(lambda: defaultdict(dict))
-        outputYTilts = defaultdict(lambda: defaultdict(dict))
-        outputXTilts = defaultdict(lambda: defaultdict(dict))
-        outputCoefficientErrors = defaultdict(lambda: defaultdict(dict))
 
         threshold = self.config.threshold
         badPixels = list(self.config.badMask)
@@ -199,13 +171,9 @@ class CrosstalkTask(pipeBase.PipelineTask):
                 FootprintSet(sourceIm, Threshold(threshold), "DETECTED")
                 detected = sourceIm.getMask().getPlaneBitMask("DETECTED")            
 
-            coefficientDict = defaultdict(lambda: defaultdict(list))
-            nonLinearCoefficientDict = defaultdict(lambda: defaultdict(list))
+            crosstalkResultsDict = defaultdict(lambda: defaultdict(list))
+            backgroundResultsDict = defaultdict(lambda: defaultdict(list))
             ratioDict = defaultdict(lambda: defaultdict(list))
-            zoffsetDict = defaultdict(lambda: defaultdict(list))
-            ytiltDict = defaultdict(lambda: defaultdict(list))
-            xtiltDict = defaultdict(lambda: defaultdict(list))
-            coefficientErrorDict = defaultdict(lambda: defaultdict(list))
             extractedCount = 0
 
             for sourceAmp in sourceDetector:
@@ -240,13 +208,9 @@ class CrosstalkTask(pipeBase.PipelineTask):
                     # iterate over targetExposure
                     targetAmpName = targetAmp.getName()
                     if sourceAmpName == targetAmpName and sourceChip == targetChip:
-                        coefficientDict[sourceAmpName][targetAmpName] = []
-                        nonLinearCoefficientDict[sourceAmpName][targetAmpName] = []
+                        crosstalkResultsDict[sourceAmpName][targetAmpName] = {}
+                        backgroundResultsDict[sourceAmpName][targetAmpName] = {}
                         ratioDict[sourceAmpName][targetAmpName] = []
-                        zoffsetDict[targetAmpName][sourceAmpName] = []
-                        ytiltDict[targetAmpName][sourceAmpName] = []
-                        xtiltDict[targetAmpName][sourceAmpName] = []
-                        coefficientErrorDict[targetAmpName][sourceAmpName] = []
                         continue
                     self.log.debug("    Target amplifier: %s", targetAmpName)
                     
@@ -269,33 +233,21 @@ class CrosstalkTask(pipeBase.PipelineTask):
                     bg = results.background
                     ratios = (targetAmpArray-bg)[ratio_select]/sourceAmpArray[ratio_select]
 
-                    coefficientDict[targetAmpName][sourceAmpName] = [float(results.coefficient)]
-                    nonLinearCoefficientDict[targetAmpName][sourceAmpName] = [float(results.nonLinearCoefficient)]
+                    crosstalkResultsDict[targetAmpName][sourceAmpName] = results.crosstalkResults
+                    backgroundResultsDict[targetAmpName][sourceAmpName] = results.backgroundResults
                     ratioDict[targetAmpName][sourceAmpName] = ratios.tolist()
-                    zoffsetDict[targetAmpName][sourceAmpName] = [float(results.backgroundParameters[0])]
-                    ytiltDict[targetAmpName][sourceAmpName] = [float(results.backgroundParameters[1])]
-                    xtiltDict[targetAmpName][sourceAmpName] = [float(results.backgroundParameters[2])]
-                    coefficientErrorDict[targetAmpName][sourceAmpName] = [float(results.coefficientError)]
                     extractedCount += count
 
             self.log.info("Extracted %d pixels from %s -> %s",
                           extractedCount, sourceChip, targetChip)
-            outputCoefficients[targetChip][sourceChip] = coefficientDict
-            outputNonLinearCoefficients[targetChip][sourceChip] = nonLinearCoefficientDict
+            outputCrosstalkResults[targetChip][sourceChip] = crosstalkResultsDict
+            outputBackgroundResults[targetChip][sourceChip] = backgroundResultsDict
             outputRatios[targetChip][sourceChip] = ratioDict
-            outputZOffsets[targetChip][sourceChip] = zoffsetDict
-            outputYTilts[targetChip][sourceChip] = ytiltDict
-            outputXTilts[targetChip][sourceChip] = xtiltDict
-            outputCoefficientErrors[targetChip][sourceChip] = coefficientErrorDict
 
         return pipeBase.Struct(
-            outputCoefficients=ddict2dict(outputCoefficients),
-            outputNonLinearCoefficients=ddict2dict(outputNonLinearCoefficients),
+            outputCrosstalkResults=ddict2dict(outputCrosstalkResults),
+            outputBackgroundResults=ddict2dict(outputBackgroundResults),
             outputSignals=ddict2dict(outputSignals),
             outputRatios=ddict2dict(outputRatios),
             outputFluxes=ddict2dict(outputFluxes),
-            outputZOffsets=ddict2dict(outputZOffsets),
-            outputYTilts=ddict2dict(outputYTilts),
-            outputXTilts=ddict2dict(outputXTilts),
-            outputCoefficientErrors=ddict2dict(outputCoefficientErrors)
         )

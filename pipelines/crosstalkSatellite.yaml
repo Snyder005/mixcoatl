@@ -8,7 +8,7 @@ tasks:
       connections.outputExposure: 'cpCrosstalkProc'
       doBias: True
       doVariance: True
-      doLinearize: False
+      doLinearize: True
       doCrosstalk: False
       doDefect: False
       doNanMasking: True
@@ -17,7 +17,7 @@ tasks:
       doBrighterFatter: False
       doDark: False
       doFlat: False
-      doApplyGains: False
+      doApplyGains: True
       doFringe: False
       doOverscan: True
       overscan.fitType: 'MEDIAN_PER_ROW'

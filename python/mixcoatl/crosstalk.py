@@ -35,77 +35,6 @@ def calculate_covariance(exposure, amp1, amp2):
 
     return cov
 
-def find_bright_columns(imarr, threshold):
-    """Find bright columns in an image array.
-    
-    Parameters
-    ----------
-    imarr : `numpy.ndarrawy`, (Nx, Ny)
-        An array representing an image to analyze.
-    threshold : `float`
-        Pixel value threshold defining a bright column.
-    Returns
-    -------
-    bright_cols : `list`
-        List of column indices corresponding to bright columns.
-    """
-    image = afwImage.ImageF(imarr)
-    
-    fp_set = FootprintSet(image, Threshold(threshold))    
-    columns = dict([(x, []) for x in range(0, image.getWidth())])
-    for footprint in fp_set.getFootprints():
-        for span in footprint.getSpans():
-            y = span.getY()
-            for x in range(span.getX0(), span.getX1()+1):
-                columns[x].append(y)
-                
-    bright_cols = []
-    x0 = image.getX0()
-    y0 = image.getY0()
-    for x in columns:
-        if bad_column(columns[x], 20):
-            bright_cols.append(x - x0)
-    #
-    # Sort the output.
-    #
-    bright_cols.sort()
-    
-    return bright_cols
-
-def bad_column(column_indices, threshold):
-    """Identify bad columns by number of masked pixels.
-    
-    Parameters
-    ----------
-    column_indices : `list`
-        List of column indices.
-    threshold : `int`
-        Number of bad pixels required to mark the column as bad.
-    Returns
-    -------
-    is_bad_column : `bool`
-        `True` if column is bad, `False` if not.
-    """
-    if len(column_indices) < threshold:
-        # There are not enough masked pixels to mark this as a bad
-        # column.
-        return False
-    # Fill an array with zeros, then fill with ones at mask locations.
-    column = np.zeros(max(column_indices) + 1)
-    column[(column_indices,)] = 1
-    # Count pixels in contiguous masked sequences.
-    masked_pixel_count = []
-    last = 0
-    for value in column:
-        if value != 0 and last == 0:
-            masked_pixel_count.append(1)
-        elif value != 0 and last != 0:
-            masked_pixel_count[-1] += 1
-        last = value
-    if len(masked_pixel_count) > 0 and max(masked_pixel_count) >= threshold:
-        return True
-    return False
-
 def rectangular_mask(imarr, y_center, x_center, lx, ly):
     """Make a rectangular pixel mask.
     Parameters
@@ -209,15 +138,25 @@ def streak_mask(imarr, line, width):
 
     return select
 
-def background_model(params, shape, order=1):
+def background_model(params, shape):
     """Create background model.
     Parameters
     ----------
-    params : array-like, (3,)
-        Input background model parameters:
-        - Y-axis tilt.
-        - X-axis tilt.
-        - Constant offset.
+    params : `dict`
+        Background model parameters dictionary with keys:
+
+        `"b00"`
+            Constant offset term (`float`).
+        `"b01"`
+            First order y term (`float`).
+        `"b10"`
+            First order x term (`float`).
+        `"b02"`
+            Second order y term (`float`).
+        `"b20"`
+            Second order x term (`float`).
+        `b11"`
+            Second order xy term (`float`).
     shape : array-like, (2,)
         Dimensions of 2-D background model pixel array.
     Returns
@@ -226,29 +165,46 @@ def background_model(params, shape, order=1):
         2-D background model pixel array.
     """
 
-    model = np.ones(shape)*params[0]
-    if order >= 1:
-        Ny, Nx = shape
-        Y, X = np.mgrid[:Ny, :Nx]
-        model += params[1]*Y + params[2]*X
-        if order == 2:
-            model += params[3]*Y*Y + params[4]*X*X + params[5]*X*Y
-    else:
-        raise ValueError("Order must be an integer greater than zero: {0}".format(order))
+    b00 = params['b00']
+    b01 = params.get('b01', 0.0)
+    b10 = params.get('b10', 0.0)
+    b02 = params.get('b02', 0.0)
+    b20 = params.get('b20', 0.0)
+    b11 = params.get('b11', 0.0)
+
+    ay, ax = shape
+    Y, X = np.mgrid[:ay, :ax]
+    model = b00*np.ones(shape) + b01*Y + b10*X + b02*Y*Y + b20*X*X + b11*X*Y
 
     return model
 
-def crosstalk_model(params, source_imarr, order=1):
+def crosstalk_model(crosstalk_params, background_params, source_imarr):
     """Create crosstalk target model.
     Parameters
     ----------
-    params : array-like, (4,)
-        Input target model parameters:
-        - crosstalk coefficient.
-        - Y-axis tilt.
-        - X-axis tilt.
-        - Constant offset.
-    aggressor_imarr : `numpy.ndarray`, (Ny, Nx)
+    crosstalk_params: `dict`
+        Crosstalk model parameters dictionary with keys:
+        
+        `"c0"`
+            First order crosstalk term (`float`).
+        `"c1"`
+            Second order crosstalk term (`float`).
+    background_params : `dict`
+        Background model parameters dictionary with keys:
+
+        `"b00"`
+            Constant offset term (`float`).
+        `"b01"`
+            First order y term (`float`).
+        `"b10"`
+            First order x term (`float`).
+        `"b02"`
+            Second order y term (`float`).
+        `"b20"`
+            Second order x term (`float`).
+        `b11"`
+            Second order xy term (`float`).
+    source_imarr : `numpy.ndarray`, (Ny, Nx)
         2-D source image pixel array.
     Returns
     -------
@@ -256,11 +212,12 @@ def crosstalk_model(params, source_imarr, order=1):
         2-D target model pixel array.
     """
     ## Model parameters
-    crosstalk_coeff = params[0]
-    bg = background_model(params[1:], source_imarr.shape, order=1)
+    c0 = crosstalk_params['c0']
+    c1 = crosstalk_params.get('c1', 0.0)
+    bg = background_model(background_params, source_imarr.shape)
 
     ## Construct model
-    model = crosstalk_coeff*source_imarr + bg
+    model = (c0*source_imarr) + (c1*np.abs(source_imarr)*source_imarr) + bg
     
     return model
 
@@ -312,142 +269,65 @@ class CrosstalkModelFitTask(pipeBase.Task):
         targetStamp = targetAmpArray[sourceMask]
         sourceStamp = sourceAmpArray[sourceMask]
 
+        crosstalkVectors = [sourceStamp]
         if self.config.doNonLinearCrosstalk:
-            bases = [sourceStamp, np.abs(sourceStamp)*sourceStamp]
-            i = 1
-        else:
-            bases = [sourceStamp]
-            i = 0
+            crosstalkVectors.append(np.abs(sourceStamp)*sourceStamp)
         
+        ## Construct background polynomials
         ay, ax = sourceAmpArray.shape
-        bases.append(np.ones((ay, ax))[sourceMask])
+        backgroundVectors = [np.ones((ay, ax))[sourceMask]]
 
         if self.config.backgroundOrder >= 1:
              
             Y, X = np.mgrid[:ay, :ax]
-            bases.append(Y[sourceMask])
-            bases.append(X[sourceMask])
+            backgroundVectors.append(Y[sourceMask])
+            backgroundVectors.append(X[sourceMask])
 
             if self.config.backgroundOrder == 2:
 
-                bases.append((Y*Y)[sourceMask])
-                bases.append((X*X)[sourceMask])
-                bases.append((X*Y)[sourceMask])
+                backgroundVectors.append((Y*Y)[sourceMask])
+                backgroundVectors.append((X*X)[sourceMask])
+                backgroundVectors.append((X*Y)[sourceMask])
 
+        ## Perform least squares fit
         b = targetStamp/noise
-        A = np.vstack(bases).T/noise
+        A = np.vstack(crosstalkVectors + backgroundVectors).T/noise
         params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
         covar = np.linalg.inv(np.dot(A.T, A))
         errors = np.sqrt(covar.diagonal())
         dof = b.shape[0]
 
-        c0 = params[0]
-        c0Error = errors[0]
+        crosstalkParams, bgParams = np.split(params, [len(crosstalkVectors)])
+        crosstalkErrors, bgErrors = np.split(errors, [len(crosstalkVectors)])
+
+        ## Assign crosstalk results
+        crosstalkResults = {'c0' : crosstalkParams[0], 
+                            'c0Error' : crosstalkErrors[0]}
         if self.config.doNonLinearCrosstalk:
-            c1 = params[1]
-            c1Error = errors[1]
-            i = 1
-        else:
-            c1 = 0.0
-            c1Error = 0.0
-            i = 0
-        backgroundParameters = params[1+i:]
-        backgroundParameterErrors = errors[1+i:]
-        background = background_model(params[1+i:], sourceAmpArray.shape, order=self.config.backgroundOrder)
+            crosstalkResults.update({'c1' : crosstalkParams[1],
+                                     'c1Error' : crosstalkErrors[1]})
+
+        ## Assign background results
+        backgroundResults = {'b00' : bgParams[0],
+                             'b00Error' : bgErrors[0]}
+        if self.config.backgroundOrder >= 1:
+            backgroundResults.update({'b01' : bgParams[1],
+                                      'b10' : bgParams[2],
+                                      'b01Error' : bgErrors[1],
+                                      'b10Error' : bgErrors[2]})
+        if self.config.backgroundOrder == 2: 
+            backgroundResults.update({'b02' : bgParams[3],
+                                      'b20' : bgParams[4],
+                                      'b11' : bgParams[5],
+                                      'b02Error' : bgErrors[3],
+                                      'b20Error' : bgErrors[4],
+                                      'b11Error' : bgErrors[5]})
+        background = background_model(backgroundResults, sourceAmpArray.shape)
 
         return pipeBase.Struct(
-            coefficient=c0,
-            coefficientError=c0Error,
-            nonLinearCoefficient=c1,
-            nonLinearCoefficientError=c1Error,
+            crosstalkResults=crosstalkResults,
+            backgroundResults=backgroundResults,
             background=background,
-            backgroundParameters=backgroundParameters,
-            backgroundParameterErrors=backgroundParameterErrors,
             residuals=res,
             degreesOfFreedom=dof
         )
-                    
-
-def crosstalk_fit(source_array, target_array, select, covariance,
-                  order=1, correct_covariance=False, seed=None):
-    """Perform crosstalk target model least-squares minimization.
-    Parameters
-    ----------
-    source_array: `numpy.ndarray`, (Ny, Nx)
-        2-D source pixel array.
-    target_array: `numpy.ndarray`, (Ny, Nx)
-        2-D target pixel array.
-    select: `numpy.ndarray`, (Ny, Nx)
-        2-D mask boolean array.
-    covariance : `numpy.ndarray`, (2, 2)
-        Covariance between read noise of amplifiers.
-    correct_covariance : 'bool'
-        Correct covariance between read noise of amplifiers.
-    seed : `int`
-        Seed to initialize random generator.
-    Returns
-    -------
-    results : `numpy.ndarray`, (10,)
-        Results of least-squares minimization:
-        - crosstalk coefficient.
-        - Y-axis tilt.
-        - X-axis tilt.
-        - Constant offset.
-        - Error estimate for crosstalk coefficient.
-        - Error estimate for Y-axis tilt.
-        - Error estimate for X-axis tilt.
-        - Error estimate for constant offset.
-        - Sum of residuals.
-        - Reduced degrees of freedom.
-    """    
-    noise = np.sqrt(np.trace(covariance))
-    source_imarr = copy.deepcopy(source_array)
-    target_imarr = copy.deepcopy(target_array)
-
-    ## Reduce correlated noise
-    if correct_covariance:
-
-        diag = np.diag(covariance)
-        reverse_covariance = -1*covariance
-        np.fill_diagonal(reverse_covariance, diag)
-
-        rng = np.random.default_rng(seed)
-        correction = rng.multivariate_normal([0.0, 0.0], reverse_covariance, size=source_imarr.shape)
-
-        source_imarr += correction[:, :, 0]
-        target_imarr += correction[:, :, 1]
-        noise *= np.sqrt(2)
-
-    target_stamp = target_imarr[select]
-
-    ## Construct masked, compressed basis arrays
-    ay, ax = source_imarr.shape
-    bases = [source_imarr[select]]
-    bases.append(np.ones((ay, ax))[select])
-    if order >= 1:
-        Y, X = np.mgrid[:ay, :ax]
-        bases.append(Y[select])
-        bases.append(X[select])
-        if order == 2:
-            bases.append((Y*Y)[select])
-            bases.append((X*X)[select])
-            bases.append((X*Y)[select])
-    else:
-        raise ValueError("Order must be an integer greater than zero: {0}".format(order))
-
-    ## Perform least squares parameter estimation
-    b = target_stamp/noise
-    A = np.vstack(bases).T/noise
-    params, res, rank, s = np.linalg.lstsq(A, b, rcond=-1)
-    covar = np.linalg.inv(np.dot(A.T, A))
-    errors = np.sqrt(covar.diagonal())
-    dof = b.shape[0] - 4
-    
-    return pipeBase.Struct(
-        coefficient = params[0],
-        coefficientError = errors[0],
-        backgroundParameters = params[1:],
-        backgroundParameterErrors = errors[1:],
-        residuals=res,
-        degreesOfFreedom=dof
-    )
