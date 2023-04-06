@@ -59,7 +59,7 @@ class DetectStreaksTask(pipeBase.Task):
         x0 = (Nx-1)/2.
         y0 = (Ny-1)/2.
         theta = np.rad2deg(angle)
-        rho = dist + x0*np.cos(angle) + y0*np.sin(angle)
+        rho = dist - x0*np.cos(angle) - y0*np.sin(angle)
         
         line = Line(rho, theta)
         sourceMask = mixCrosstalk.streak_mask(imarr, line, self.config.maskWidth)

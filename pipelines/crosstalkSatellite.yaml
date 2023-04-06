@@ -28,6 +28,8 @@ tasks:
       connections.rawExp: 'raw'
       sourceType: 'streak'
       detectStreaks.maskWidth: 80.
+      detectStreaks.lowThreshold: 25
+      detectStreaks.highThreshold: 50
       crosstalkSolve.correctCovariance: True
       crosstalkSolve.backgroundOrder: 2
       crosstalkSolve.doNonLinearCrosstalk: True

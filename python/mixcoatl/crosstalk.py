@@ -131,8 +131,8 @@ def streak_mask(imarr, line, width):
     Ny, Nx = imarr.shape
     Y, X = np.ogrid[:Ny, :Nx]
     theta = np.deg2rad(line.theta)
-    x0 = -(Nx-1)/2.
-    y0 = -(Ny-1)/2.
+    x0 = (Nx-1)/2.
+    y0 = (Ny-1)/2.
     
     select = np.abs(((X-x0)*np.cos(theta) + (Y-y0)*np.sin(theta)) - line.rho) < width/2.
 
