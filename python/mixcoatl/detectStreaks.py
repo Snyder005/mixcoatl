@@ -76,7 +76,7 @@ class DetectStreaksTask(pipeBase.Task):
         detectionMask = (mask.array & mask.getPlaneBitMask('DETECTED'))
         filterData = detectionMask.astype(int) 
 
-        edges = feature.canny(imarr, sigma=1, low_threshold=0, high_threshold=1)
+        edges = feature.canny(filterData, sigma=1.0, low_threshold=0, high_threshold=1)
 
         lines = lsst.kht.find_lines(edges, self.config.clusterMinimumSize,
                                     self.config.clusterMinimumDeviation, self.config.delta,
