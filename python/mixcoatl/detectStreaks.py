@@ -1,6 +1,7 @@
 import numpy as np
 from skimage import feature
 from sklearn.cluster import KMeans
+from skimage.transform import hough_line, hough_line_peaks
 from astropy.stats import median_absolute_deviation, sigma_clipped_stats
 
 from lsst.utils.timer import timeMethod
@@ -77,15 +78,25 @@ class DetectStreaksTask(pipeBase.Task):
         filterData = detectionMask.astype(int) 
 
         edges = feature.canny(filterData, sigma=1.0, low_threshold=0, high_threshold=1)
-
-        lines = lsst.kht.find_lines(edges, self.config.clusterMinimumSize,
-                                    self.config.clusterMinimumDeviation, self.config.delta,
-                                    self.config.minimumKernelHeight, self.config.nSigma,
-                                    self.config.absMinimumKernelHeight)
-        lines = LineCollection(lines.rho, lines.theta)
+        tested_angles = np.linspace(-np.pi/2., np.pi/2., 1000)
+        h, theta, d = hough_line(edges, theta=tested_angles)
+        accum, angles, dists = hough_line_peaks(h, theta, d)
+        
+        rhos = []
+        thetas = []
+        for i in range(len(angles)):
+            angle = angles[i]
+            dist = dists[i]
+            Ny, Nx = imarr.shape
+            x0 = (Nx-1)/2.
+            y0 = (Ny-1)/2.
+            thetas.append(np.rad2deg(angle))
+            rhos.append(dist - x0*np.cos(angle) - y0*np.sin(angle))
+            
+        lines = LineCollection(rhos, thetas)
 
         # fix this
-        if len(lines) != 2:
+        if len(lines) < 2:
             raise RuntimeError("No crosstalk source detected.")
         
         result = self.findClusters(lines)
