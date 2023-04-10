@@ -128,7 +128,6 @@ class DetectStreaksTask(pipeBase.Task):
             for c in range(nClusters):
                 inCluster = X[kmeans.labels_ == c]
                 clusterStandardDeviations[c] = np.std(inCluster, axis=0)
-                print(clusterStandardDeviations)
             # Are the rhos and thetas in each cluster all below the threshold?
             if (clusterStandardDeviations <= 1.0).all():
                 break
