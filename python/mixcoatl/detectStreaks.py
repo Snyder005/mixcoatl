@@ -106,8 +106,8 @@ class DetectStreaksTask(pipeBase.Task):
         else:
             line = result[0]
 
-        sourceMask = mixCrosstalk.streak_mask(imarr, line, self.config.maskWidth)
-        signal = sigma_clipped_stats(imarr, mask=~mixCrosstalk.streak_mask(imarr, line, 1.0),
+        sourceMask = mixCrosstalk.make_streak_mask(imarr, line, self.config.maskWidth)
+        signal = sigma_clipped_stats(imarr, mask=~mixCrosstalk.make_streak_mask(imarr, line, 1.0),
                                      cenfunc='median', stdfunc=median_absolute_deviation)[1]
 
         return pipeBase.Struct(
