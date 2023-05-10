@@ -77,7 +77,7 @@ class DetectStreaksTask(pipeBase.Task):
         detectionMask = (mask.array & mask.getPlaneBitMask('DETECTED'))
         filterData = detectionMask.astype(int) 
 
-        edges = feature.canny(filterData, sigma=1.0, low_threshold=0, high_threshold=1)
+        edges = feature.canny(filterData, sigma=1.0, low_threshold=5, high_threshold=15)
         tested_angles = np.linspace(-np.pi/2., np.pi/2., 1000)
         h, theta, d = hough_line(edges, theta=tested_angles)
         accum, angles, dists = hough_line_peaks(h, theta, d)
