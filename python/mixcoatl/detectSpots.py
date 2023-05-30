@@ -49,19 +49,19 @@ class DetectSpotsTask(pipeBase.Task):
         y, x = np.unravel_index(smoothed.argmax(), smoothed.shape)
         
         signal = sigma_clipped_stats(imarr,
-                                     mask=~mixCrosstalk.circular_mask(imarr, y, x, radius=10),
+                                     mask=~mixCrosstalk.make_circular_mask(imarr, y, x, radius=10),
                                      cenfunc='median', stdfunc=median_absolute_deviation)[1]
 
         if signal < self.config.threshold:
             raise RuntimeError("No crosstalk source detected.")
 
-        sourceMask = mixCrosstalk.rectangular_mask(imarr, y, x, ly=self.config.maskLength, 
-                                                   lx=self.config.maskLength)
+        sourceMask = mixCrosstalk.make_rectangular_mask(imarr, y, x, ly=self.config.maskLength, 
+                                                        lx=self.config.maskLength)
         
         if self.config.doAnnularCutout:
-            cutout = ~mixCrosstalk.annular_mask(imarr, y, x,
-                                               inner_radius=self.config.annulusInnerRadius,
-                                               outer_radius=self.config.annulusOuterRadius)
+            cutout = ~mixCrosstalk.make_annular_mask(imarr, y, x,
+                                                     inner_radius=self.config.annulusInnerRadius,
+                                                     outer_radius=self.config.annulusOuterRadius)
             sourceMask = sourceMask*cutout
 
         return pipeBase.Struct(

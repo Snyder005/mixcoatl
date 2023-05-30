@@ -35,7 +35,7 @@ def calculate_covariance(exposure, amp1, amp2):
 
     return cov
 
-def rectangular_mask(imarr, y_center, x_center, lx, ly):
+def make_rectangular_mask(imarr, y_center, x_center, lx, ly):
     """Make a rectangular pixel mask.
     Parameters
     ----------
@@ -60,7 +60,7 @@ def rectangular_mask(imarr, y_center, x_center, lx, ly):
 
     return select
 
-def circular_mask(imarr, y_center, x_center, radius):
+def make_circular_mask(imarr, y_center, x_center, radius):
     """Make a circular pixel mask.
     Parameters
     ----------
@@ -83,7 +83,7 @@ def circular_mask(imarr, y_center, x_center, radius):
 
     return select
 
-def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
+def make_annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
     """Make an annular pixel mask.
     Parameters
     ----------
@@ -112,7 +112,7 @@ def annular_mask(imarr, y_center, x_center, inner_radius, outer_radius):
 
     return select
 
-def streak_mask(imarr, line, width):
+def make_streak_mask(imarr, line, width):
     """Make a pixel mask along a straight line.
     Parameters
     ----------
@@ -138,7 +138,7 @@ def streak_mask(imarr, line, width):
 
     return select
 
-def background_model(params, shape):
+def make_background_model(params, shape):
     """Create background model.
     Parameters
     ----------
@@ -178,7 +178,7 @@ def background_model(params, shape):
 
     return model
 
-def crosstalk_model(crosstalk_params, background_params, source_imarr):
+def make_crosstalk_model(crosstalk_params, background_params, source_imarr):
     """Create crosstalk target model.
     Parameters
     ----------
@@ -214,7 +214,7 @@ def crosstalk_model(crosstalk_params, background_params, source_imarr):
     ## Model parameters
     c0 = crosstalk_params['c0']
     c1 = crosstalk_params.get('c1', 0.0)
-    bg = background_model(background_params, source_imarr.shape)
+    bg = make_background_model(background_params, source_imarr.shape)
 
     ## Construct model
     model = (c0*source_imarr) + (c1*np.abs(source_imarr)*source_imarr) + bg
@@ -322,7 +322,7 @@ class CrosstalkModelFitTask(pipeBase.Task):
                                       'b02Error' : bgErrors[3],
                                       'b20Error' : bgErrors[4],
                                       'b11Error' : bgErrors[5]})
-        background = background_model(backgroundResults, sourceAmpArray.shape)
+        background = make_background_model(backgroundResults, sourceAmpArray.shape)
 
         return pipeBase.Struct(
             crosstalkResults=crosstalkResults,

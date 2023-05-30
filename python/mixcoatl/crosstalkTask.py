@@ -208,9 +208,9 @@ class CrosstalkTask(pipeBase.PipelineTask):
                     # iterate over targetExposure
                     targetAmpName = targetAmp.getName()
                     if sourceAmpName == targetAmpName and sourceChip == targetChip:
-                        crosstalkResultsDict[sourceAmpName][targetAmpName] = {}
-                        backgroundResultsDict[sourceAmpName][targetAmpName] = {}
-                        ratioDict[sourceAmpName][targetAmpName] = []
+                        crosstalkResultsDict[targetAmpName][sourceAmpName] = {}
+                        backgroundResultsDict[targetAmpName][sourceAmpName] = {}
+                        ratioDict[targetAmpName][sourceAmpName] = []
                         continue
                     self.log.debug("    Target amplifier: %s", targetAmpName)
                     
