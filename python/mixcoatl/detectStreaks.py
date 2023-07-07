@@ -123,7 +123,7 @@ class DetectStreaksTask(pipeBase.Task):
         nClusters = 1
 
         while True:
-            kmeans = KMeans(n_clusters=nClusters).fit(X)
+            kmeans = KMeans(n_clusters=nClusters, n_init='auto').fit(X)
             clusterStandardDeviations = np.zeros((nClusters, 2))
             for c in range(nClusters):
                 inCluster = X[kmeans.labels_ == c]
