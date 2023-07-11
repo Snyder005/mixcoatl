@@ -66,10 +66,22 @@ class CrosstalkTaskConnections(pipeBase.PipelineTaskConnections,
         dimensions=("instrument", "exposure", "detector"),
     )
 
+    def __init__(self, *, config=None):
+
+        if config.doWriteRatios is not True:
+
+            del self.outputRatios
+            del self.outputFluxes
+
 class CrosstalkTaskConfig(pipeBase.PipelineTaskConfig,
                           pipelineConnections=CrosstalkTaskConnections):
     """Configuration for the measurement of pixel ratios.
     """
+    doWriteRatios = Field(
+        dtype=bool,
+        default=True,
+        doc="Persist outputRatios and outputFluxes?"
+    )
     threshold = Field(
         dtype=float,
         default=10000.,

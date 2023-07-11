@@ -1,5 +1,5 @@
 import numpy as np
-from skimage import feature
+from skimage.feature import canny
 from sklearn.cluster import KMeans
 from skimage.transform import hough_line, hough_line_peaks
 from astropy.stats import median_absolute_deviation, sigma_clipped_stats
@@ -19,37 +19,20 @@ class DetectStreaksConfig(pexConfig.Config):
         default=80.,
         doc="Width of streak mask."
     )
-    minimumKernelHeight = pexConfig.Field(
-        doc="Minimum height of the streak-finding kernel relative to the tallest kernel",
+    sigma = pexConfig.Field(
         dtype=float,
-        default=0.0,
+        default=15.,
+        doc="Standard deviation of the Gaussian filter."
     )
-    absMinimumKernelHeight = pexConfig.Field(
-        doc="Minimum absolute height of the streak-finding kernel",
+    lowThreshold = pexConfig.Field(
         dtype=float,
-        default=5,
+        default=5.,
+        doc="Lower bound for hysteresis thresholding (linking edges)."
     )
-    clusterMinimumSize = pexConfig.Field(
-        doc="Minimum size in pixels of detected clusters",
-        dtype=int,
-        default=50,
-    )
-    clusterMinimumDeviation = pexConfig.Field(
-        doc="Allowed deviation (in pixels) from a straight line for a detected "
-            "line",
-        dtype=int,
-        default=2,
-    )
-    delta = pexConfig.Field(
-        doc="Stepsize in angle-radius parameter space",
+    highThreshold = pexConfig.Field(
         dtype=float,
-        default=0.2,
-    )
-    nSigma = pexConfig.Field(
-        doc="Number of sigmas from center of kernel to include in voting "
-            "procedure",
-        dtype=float,
-        default=2,
+        default=15.,
+        doc="Upper bound for hysteresis thresholding (linking edges)."
     )
     rhoBinSize = pexConfig.Field(
         doc="Binsize in pixels for position parameter rho when finding "
@@ -71,14 +54,12 @@ class DetectStreaksTask(pipeBase.Task):
 
     @timeMethod
     def run(self, maskedImage):
-        
-        mask = maskedImage.getMask()
-        imarr = maskedImage.getImage().getArray()
-        detectionMask = (mask.array & mask.getPlaneBitMask('DETECTED'))
-        filterData = detectionMask.astype(int) 
 
-        edges = feature.canny(filterData, sigma=1.0, low_threshold=5, high_threshold=15)
+        imarr = maskedImage.getImage().getArray()
         tested_angles = np.linspace(-np.pi/2., np.pi/2., 1000)
+        edges = canny(imarr, sigma=self.config.sigma,
+                              low_threshold=self.config.lowThreshold,
+                              high_threshold=self.config.highThreshold)
         h, theta, d = hough_line(edges, theta=tested_angles)
         accum, angles, dists = hough_line_peaks(h, theta, d)
         
@@ -95,7 +76,6 @@ class DetectStreaksTask(pipeBase.Task):
             
         lines = LineCollection(rhos, thetas)
 
-        # fix this
         if len(lines) < 2:
             raise RuntimeError("No crosstalk source detected.")
         
@@ -112,7 +92,8 @@ class DetectStreaksTask(pipeBase.Task):
 
         return pipeBase.Struct(
             signal=signal,
-            sourceMask=sourceMask
+            sourceMask=sourceMask,
+            line=line
         )
 
     def findClusters(self, lines):
@@ -123,7 +104,7 @@ class DetectStreaksTask(pipeBase.Task):
         nClusters = 1
 
         while True:
-            kmeans = KMeans(n_clusters=nClusters).fit(X)
+            kmeans = KMeans(n_clusters=nClusters, n_init='auto').fit(X)
             clusterStandardDeviations = np.zeros((nClusters, 2))
             for c in range(nClusters):
                 inCluster = X[kmeans.labels_ == c]
