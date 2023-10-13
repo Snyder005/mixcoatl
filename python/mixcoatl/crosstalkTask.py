@@ -238,9 +238,12 @@ class CrosstalkTask(pipeBase.PipelineTask):
                     targetAmpImage = CrosstalkCalib.extractAmp(targetIm, targetAmp, sourceAmp,
                                                                isTrimmed=self.config.isTrimmed)
                     targetAmpArray = targetAmpImage.image.array
-                    results = self.crosstalkSolve.run(sourceAmpArray, targetAmpArray, model_select, 
+                    try:
+                        results = self.crosstalkSolve.run(sourceAmpArray, targetAmpArray, model_select, 
                                                       covariance=covariance, seed=189)
-
+                    except np.linalg.LinAlgError:
+                        continue
+    
                     ## Calculate background-subtracted ratios
                     bg = results.background
                     ratios = (targetAmpArray-bg)[ratio_select]/sourceAmpArray[ratio_select]
