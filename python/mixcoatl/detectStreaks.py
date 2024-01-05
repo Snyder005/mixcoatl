@@ -101,12 +101,10 @@ class DetectStreaksTask(pipeBase.Task):
             raise RuntimeError("No crosstalk source detected.")
         
         result = self.findClusters(lines)
+        result = sorted(result, key=lambda x : sigma_clipped_stats(imarr, mask=~mixCrosstalk.make_streak_mask(imarr, x, 1.0), 
+                                                                   cenfunc='median', stdfunc=median_absolute_deviation)[1])
 
-        if len(result) > 1:
-            raise RuntimeError("Could not cluster lines to identify streak.")
-        else:
-            line = result[0]
-
+        line = result[-1]
         sourceMask = mixCrosstalk.make_streak_mask(imarr, line, self.config.maskWidth)
         signal = sigma_clipped_stats(imarr, mask=~mixCrosstalk.make_streak_mask(imarr, line, 1.0),
                                      cenfunc='median', stdfunc=median_absolute_deviation)[1]
