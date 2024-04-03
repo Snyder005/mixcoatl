@@ -48,10 +48,10 @@ from lsst.meas.base import (
 )
 from lsst.meas.deblender import SourceDeblendTask
 import lsst.meas.extensions.shapeHSM  # noqa: F401 needed for default shape plugin
-from .measurePsf import MeasurePsfTask
-from .repair import RepairTask
-from .maskStreaks import MaskStreaksTask
-from .computeExposureSummaryStats import ComputeExposureSummaryStatsTask
+from lsst.pipe.tasks.measurePsf import MeasurePsfTask
+from lsst.pipe.tasks.repair import RepairTask
+from lsst.pipe.tasks.maskStreaks import MaskStreaksTask
+from lsst.pipe.tasks.computeExposureSummaryStats import ComputeExposureSummaryStatsTask
 from lsst.pex.exceptions import LengthError
 from lsst.utils.timer import timeMethod
 
@@ -66,24 +66,24 @@ class CharacterizeExposureConnections(pipeBase.PipelineTaskConnections,
     )
     characterized = cT.Output(
         doc="Output characterized data.",
-        name="icExp",
+        name="ecExp",
         storageClass="ExposureF",
         dimensions=["instrument", "exposure", "detector"],
     )
     sourceCat = cT.Output(
         doc="Output source catalog.",
-        name="icSrc",
+        name="ecSrc",
         storageClass="SourceCatalog",
         dimensions=["instrument", "exposure", "detector"],
     )
     backgroundModel = cT.Output(
         doc="Output background model.",
-        name="icExpBackground",
+        name="ecExpBackground",
         storageClass="Background",
         dimensions=["instrument", "exposure", "detector"],
     )
     outputSchema = cT.InitOutput(
-        doc="Schema of the catalog produced by CharacterizeImage",
+        doc="Schema of the catalog produced by CharacterizeExposure",
         name="icSrc_schema",
         storageClass="SourceCatalog",
     )
@@ -284,7 +284,7 @@ class CharacterizeExposureTask(pipeBase.PipelineTask):
     Notes
     -----
     Debugging:
-    CharacterizeImageTask has a debug dictionary with the following keys:
+    CharacterizeExposureTask has a debug dictionary with the following keys:
 
     frame
         int: if specified, the frame of first debug image displayed (defaults to 1)
@@ -304,8 +304,8 @@ class CharacterizeExposureTask(pipeBase.PipelineTask):
         bool; if True display image and sources after final measurement
     """
 
-    ConfigClass = CharacterizeImageConfig
-    _DefaultName = "characterizeImage"
+    ConfigClass = CharacterizeExposureConfig
+    _DefaultName = "characterizeExposure"
 
     def __init__(self, schema=None, **kwargs):
         super().__init__(**kwargs)
