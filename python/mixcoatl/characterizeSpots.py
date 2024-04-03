@@ -36,7 +36,7 @@ import lsst.meas.extensions.shapeHSM
 from lsst.utils.timer import timeMethod
 from lsst.afw.table import SourceTable, SourceCatalog
 from lsst.meas.algorithms.installGaussianPsf import InstallGaussianPsfTask
-from lsst.obs.base import ExposureIdInfo
+from lsst.meas.base import IdGenerator
 from lsst.meas.base import SingleFrameMeasurementTask, CatalogCalculationTask
 from lsst.pipe.tasks.repair import RepairTask
 from lsst.pex.exceptions import LengthError
@@ -172,20 +172,20 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
         return {'outputSchema': outputCatSchema}
 
     @timeMethod
-    def run(self, exposure, exposureIdInfo=None):
+    def run(self, exposure, idGenerator=None):
         
         if not exposure.hasPsf():
             self.installSimplePsf.run(exposure=exposure)
 
-        if exposureIdInfo is None:
-            exposureIdInfo = ExposureIdInfo()
+        if idGenerator is None:
+            idGenerator = IdGenerator()
 
         try:
             self.repair.run(exposure=exposure, keepCRs=True)
         except LengthError:
             self.log.info("Skipping cosmic ray detection: Too many CR pixels (max %0.f)" % self.repair.cosmicray.nCrPixelMax)
 
-        sourceIdFactory = exposureIdInfo.makeSourceIdFactory()
+        sourceIdFactory = idGenerator.make_table_id_factory()
         table = SourceTable.make(self.schema, sourceIdFactory)
         table.setMetadata(self.algMetadata)
         
@@ -209,7 +209,7 @@ class CharacterizeSpotsTask(pipeBase.PipelineTask):
         sources = afwTable.SourceCatalog(table)
         fps.makeSources(sources)
 
-        self.measurement.run(measCat=sources, exposure=exposure, exposureId=exposureIdInfo.expId)
+        self.measurement.run(measCat=sources, exposure=exposure, exposureId=idGenerator.catalog_id)
         self.catalogCalculation.run(sources)
 
         ## Add metadata to source catalog
