@@ -36,6 +36,7 @@ from lsst.meas.algorithms import (
     SourceDetectionTask,
     MeasureApCorrTask,
     MeasureApCorrError,
+    MaskStreaksTask,
 )
 from lsst.meas.algorithms.installGaussianPsf import InstallGaussianPsfTask
 from lsst.meas.astrom import displayAstrometry
@@ -44,13 +45,11 @@ from lsst.meas.base import (
     ApplyApCorrTask,
     CatalogCalculationTask,
     IdGenerator,
-    DetectorVisitIdGeneratorConfig,
 )
 from lsst.meas.deblender import SourceDeblendTask
 import lsst.meas.extensions.shapeHSM  # noqa: F401 needed for default shape plugin
 from lsst.pipe.tasks.measurePsf import MeasurePsfTask
 from lsst.pipe.tasks.repair import RepairTask
-from lsst.pipe.tasks.maskStreaks import MaskStreaksTask
 from lsst.pipe.tasks.computeExposureSummaryStats import ComputeExposureSummaryStatsTask
 from lsst.pex.exceptions import LengthError
 from lsst.utils.timer import timeMethod
@@ -222,7 +221,6 @@ class CharacterizeExposureConfig(pipeBase.PipelineTaskConfig,
         doc="Subtask for masking streaks. Only used if doMaskStreaks is True. "
             "Adds a mask plane to an exposure, with the mask plane name set by streakMaskName.",
     )
-    idGenerator = DetectorVisitIdGeneratorConfig.make_field()
 
     def setDefaults(self):
         super().setDefaults()
@@ -247,11 +245,16 @@ class CharacterizeExposureConfig(pipeBase.PipelineTaskConfig,
         self.measurement.plugins.names = [
             "base_PixelFlags",
             "base_SdssCentroid",
+            "base_SdssShape",
             "ext_shapeHSM_HsmSourceMoments",
             "base_GaussianFlux",
             "base_PsfFlux",
             "base_CircularApertureFlux",
             "base_ClassificationSizeExtendedness",
+            "ext_shapeHSM_HsmPsfMoments",
+            "ext_shapeHSM_HsmSourceMomentsRound",
+            "ext_shapeHSM_HigherOrderMomentsSource",
+            "ext_shapeHSM_HigherOrderMomentsPSF",
         ]
         self.measurement.slots.shape = "ext_shapeHSM_HsmSourceMoments"
 
@@ -335,8 +338,6 @@ class CharacterizeExposureTask(pipeBase.PipelineTask):
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         inputs = butlerQC.get(inputRefs)
-        if 'idGenerator' not in inputs.keys():
-            inputs['idGenerator'] = self.config.idGenerator.apply(butlerQC.quantum.dataId)
         outputs = self.run(**inputs)
         butlerQC.put(outputs, outputRefs)
 
