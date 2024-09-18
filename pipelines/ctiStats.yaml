@@ -1,0 +1,10 @@
+description:
+  Pipeline to serial and parallel CTI vs flux for flat data.
+tasks:
+  ctiStatsTask:
+    class: mixcoatl.ctiStats.CtiStatsTask
+    config:
+      connections.raws: "raw"
+      connections.bias: "bias"
+      connections.camera: "camera"
+      connections.cti_vs_flux: "cti_vs_flux"
