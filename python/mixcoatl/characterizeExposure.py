@@ -445,11 +445,14 @@ class CharacterizeExposureTask(pipeBase.PipelineTask):
 
         self.catalogCalculation.run(dmeRes.sourceCat)
 
+        # Calculate peak signal values
+        outputCat = self.calculatePeakSignals(dmeRes.exposure, dmeRes.sourceCat)
+        
         self.display("measure", exposure=dmeRes.exposure, sourceCat=dmeRes.sourceCat)
 
         return pipeBase.Struct(
             exposure=dmeRes.exposure,
-            sourceCat=dmeRes.sourceCat,
+            sourceCat=outputCat,
             background=dmeRes.background,
             psfCellSet=dmeRes.psfCellSet,
 
@@ -551,6 +554,35 @@ class CharacterizeExposureTask(pipeBase.PipelineTask):
             background=background,
             psfCellSet=measPsfRes.cellSet,
         )
+
+    def calculatePeakSignals(self, exposure, sourceCat, s=15):
+
+        schema = sourceCat.getSchema()
+        mapper = afwTable.SchemaMapper(schema)
+        mapper.addMinimalSchema(schema, True)
+        peak_signal_col = mapper.editOutputSchema().addField('ext_PeakSignal', type=float,
+                                                             doc='Peak signal associated with the source.')
+
+        peak_signals = []
+        imarr = exposure.getImage().getArray()
+        for i,pt in enumerate(sourceCat):
+            # The numpy coordinate system and the Image coordinate systems are flipped
+            x = int(sourceCat['base_SdssCentroid_y'][i])
+            y = int(sourceCat['base_SdssCentroid_x'][i])
+
+            xmin = max(0,x-s)
+            xmax = min(imarr.shape[0]-1, x+s+1)
+            ymin = max(0,y-s)
+            ymax = min(imarr.shape[1]-1, y+s+1)
+            stamp_center = [sourceCat['base_SdssCentroid_x'][i] - ymin, sourceCat['base_SdssCentroid_y'][i] - xmin]
+
+            peak_signals.append(np.max(imarr[xmin:xmax,ymin:ymax]))
+
+        outputCat = afwTable.SourceCatalog(mapper.getOutputSchema())
+        outputCat.extend(sourceCat, mapper=mapper)
+        outputCat[peak_signal_col] = peak_signals
+
+        return outputCat
 
     def display(self, itemName, exposure, sourceCat=None):
         """Display exposure and sources on next frame (for debugging).
