@@ -228,9 +228,9 @@ class CrosstalkTask(pipeBase.PipelineTask):
                 sourceMask = detectedSourceResults.sourceMask
                 signal = detectedSourceResults.signal
             
-                model_select = (sourceMask & (sourceAmpMask & bad == 0)
+                source_amp_select = (sourceMask & (sourceAmpMask & bad == 0)
                                 & np.isfinite(sourceAmpImage.image.array))
-                ratio_select = (model_select & (sourceAmpMask & detected > 0))
+                ratio_select = (source_amp_select & (sourceAmpMask & detected > 0))
                 count = np.sum(ratio_select)
                 self.log.debug("  Source amplifier: %s", sourceAmpName)
 
@@ -259,6 +259,10 @@ class CrosstalkTask(pipeBase.PipelineTask):
                     targetAmpImage = CrosstalkCalib.extractAmp(targetIm, targetAmp, sourceAmp,
                                                                isTrimmed=self.config.isTrimmed)
                     targetAmpArray = targetAmpImage.image.array
+                    targetAmpMask = targetAmpImage.mask.array
+                    target_amp_select = (targetAmpMask & bad == 0) & (targetAmpMask & detected == 0)
+                    model_select = target_amp_select & source_amp_select
+
                     try:
                         results = self.crosstalkSolve.run(sourceAmpArray, targetAmpArray, model_select, 
                                                       covariance=covariance, seed=189)
