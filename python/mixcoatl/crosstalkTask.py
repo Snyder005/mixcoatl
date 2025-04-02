@@ -227,15 +227,15 @@ class CrosstalkTask(pipeBase.PipelineTask):
 
                 sourceMask = detectedSourceResults.sourceMask
                 signal = detectedSourceResults.signal
-            
-                model_select = (sourceMask & (sourceAmpMask & bad == 0)
-                                & np.isfinite(sourceAmpImage.image.array))
-                ratio_select = (model_select & (sourceAmpMask & detected > 0))
-                count = np.sum(ratio_select)
+
+                sourcePixels = (sourceMask & (sourceAmpMask & bad == 0) 
+                    & np.isfinite(sourceAmpImage.image.array))
+                ratioPixels = sourcePixels & (sourceAmpMask & detected > 0)
+                count = np.sum(ratioPixels)
                 self.log.debug("  Source amplifier: %s", sourceAmpName)
 
                 outputSignals[sourceChip][sourceAmpName] = [float(signal)]
-                outputFluxes[sourceChip][sourceAmpName] = sourceAmpImage.image.array[ratio_select].tolist()
+                outputFluxes[sourceChip][sourceAmpName] = sourceAmpImage.image.array[ratioPixels].tolist()
 
                 for targetAmp in targetDetector:
                     # iterate over targetExposure
@@ -259,15 +259,18 @@ class CrosstalkTask(pipeBase.PipelineTask):
                     targetAmpImage = CrosstalkCalib.extractAmp(targetIm, targetAmp, sourceAmp,
                                                                isTrimmed=self.config.isTrimmed)
                     targetAmpArray = targetAmpImage.image.array
+                    targetAmpMask = targetAmpImage.mask.array
+                    modelPixels = sourcePixels & (targetAmpMask & bad ==0) & (targetAmpMask & detected == 0)
+
                     try:
-                        results = self.crosstalkSolve.run(sourceAmpArray, targetAmpArray, model_select, 
+                        results = self.crosstalkSolve.run(sourceAmpArray, targetAmpArray, modelPixels, 
                                                       covariance=covariance, seed=189)
                     except np.linalg.LinAlgError:
                         continue
     
                     ## Calculate background-subtracted ratios
                     bg = results.background
-                    ratios = (targetAmpArray-bg)[ratio_select]/sourceAmpArray[ratio_select]
+                    ratios = (targetAmpArray-bg)[ratioPixels]/sourceAmpArray[ratioPixels]
 
                     crosstalkResultsDict[targetAmpName][sourceAmpName] = results.crosstalkResults
                     backgroundResultsDict[targetAmpName][sourceAmpName] = results.backgroundResults
