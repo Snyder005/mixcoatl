@@ -195,7 +195,7 @@ def make_background_model(params, shape):
 
     ay, ax = shape
     Y, X = np.mgrid[:ay, :ax]
-    model = b00*np.ones(shape) + b01*Y + b10*X + b02*Y*Y + b20*X*X + b11*X*Y
+    model = b00 + b01*Y + b10*X + b02*Y*Y + b20*X*X + b11*X*Y
 
     return model
 
@@ -207,9 +207,11 @@ def make_crosstalk_model(crosstalk_params, background_params, source_imarr):
         Crosstalk model parameters dictionary with keys:
         
         `"c0"`
-            First order crosstalk term (`float`).
+            Linear crosstalk term (`float`).
         `"c1"`
-            Second order crosstalk term (`float`).
+            First-order nonlinear crosstalk term (`float`).
+        `"c2"`
+            Second-order nonlinear crosstalk term (`float`).
     background_params : `dict`
         Background model parameters dictionary with keys:
 
@@ -235,10 +237,12 @@ def make_crosstalk_model(crosstalk_params, background_params, source_imarr):
     ## Model parameters
     c0 = crosstalk_params['c0']
     c1 = crosstalk_params.get('c1', 0.0)
+    c2 = crosstalk_params.get('c2', 0.0)
     bg = make_background_model(background_params, source_imarr.shape)
 
     ## Construct model
-    model = (c0*source_imarr) + (c1*np.abs(source_imarr)*source_imarr) + bg
+    s = source_imarr
+    model = bg + c0*s + c1*np.abs(s)*s + c2*s*s*s
     
     return model
 
@@ -254,15 +258,21 @@ class CrosstalkModelFitConfig(pexConfig.Config):
         default=1,
         doc="2D polynomial order for background model.",
         allowed={
-            1 : "1st-order 2D polynomial background (sloped plane).",
+            0 : "Constant background.",
+            1 : "1st-order 2D polynomial background.",
             2 : "2nd-order 2D polynomial background."
         }
     )
-    doNonLinearCrosstalk = pexConfig.Field(
-        dtype=bool,
-        default=False,
-        doc="Include signal-dependent crosstalk in model fit."
-    )
+    crosstalkOrder = pexConfig.ChoiceField(
+        dtype=int,
+        default=1,
+        doc="Order for crosstalk model.",
+        allowed={
+            0 : "Constant (linear) crosstalk.",
+            1 : "1st-order (non-linear) crosstalk.",
+            2 : "2nd-order (non-linear) crosstalk."
+        }
+    )        
 
 class CrosstalkModelFitTask(pipeBase.Task):
 
@@ -281,7 +291,8 @@ class CrosstalkModelFitTask(pipeBase.Task):
             np.fill_diagonal(invCovariance, diag)
 
             rng = np.random.default_rng(seed)
-            correction = rng.multivariate_normal([0.0, 0.0], invCovariance, size=sourceAmpArray.shape)
+            correction = rng.multivariate_normal([0.0, 0.0], invCovariance, 
+                                                 size=sourceAmpArray.shape)
 
             sourceAmpArray = sourceAmpArray + correction[:, :, 0]
             targetAmpArray = targetAmpArray + correction[:, :, 1]
@@ -290,14 +301,17 @@ class CrosstalkModelFitTask(pipeBase.Task):
         targetStamp = targetAmpArray[sourceMask]
         sourceStamp = sourceAmpArray[sourceMask]
 
+        ## Construct crosstalk basis polynomials
         crosstalkVectors = [sourceStamp]
-        if self.config.doNonLinearCrosstalk:
+        if self.config.crosstalkOrder >=1:
             crosstalkVectors.append(np.abs(sourceStamp)*sourceStamp)
-        
-        ## Construct background polynomials
+            
+            if self.config.crosstalkOrder == 2:
+                crosstalkVectors.append(sourceStamp*sourceStamp*sourceStamp)        
+
+        ## Construct background basis polynomials
         ay, ax = sourceAmpArray.shape
         backgroundVectors = [np.ones((ay, ax))[sourceMask]]
-
         if self.config.backgroundOrder >= 1:
              
             Y, X = np.mgrid[:ay, :ax]
@@ -324,9 +338,12 @@ class CrosstalkModelFitTask(pipeBase.Task):
         ## Assign crosstalk results
         crosstalkResults = {'c0' : crosstalkParams[0], 
                             'c0Error' : crosstalkErrors[0]}
-        if self.config.doNonLinearCrosstalk:
+        if self.config.crosstalkOrder >= 1:
             crosstalkResults.update({'c1' : crosstalkParams[1],
                                      'c1Error' : crosstalkErrors[1]})
+        if self.config.crosstalkOrder == 2:
+            crosstalkResults.update({'c2' : crosstalkParams[2],
+                                     'c2Error' : crosstalkErrors[2]})
 
         ## Assign background results
         backgroundResults = {'b00' : bgParams[0],
