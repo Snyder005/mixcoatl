@@ -217,16 +217,17 @@ class CrosstalkTask(pipeBase.PipelineTask):
                 sourceAmpArray = sourceAmpImage.image.array
                 
                 ## Find source
-                try:
-                    if self.config.sourceType == 'streak':
-                        detectedSourceResults = self.detectStreaks.run(sourceAmpImage)
-                    elif self.config.sourceType == 'spot':
-                        detectedSourceResults = self.detectSpots.run(sourceAmpImage)
-                except RuntimeError:
-                    continue
+                if self.config.sourceType == 'streak':
 
-                sourceMask = detectedSourceResults.sourceMask
-                signal = detectedSourceResults.signal
+                    detectedSourceResults = self.detectStreaks.run(sourceAmpImage)
+                    sourceMask = detectedSourceResults.sourceMask
+                    signal = detectedSourceResults.signals[-1]
+
+                elif self.config.sourceType == 'spot':
+
+                    detectedSourceResults = self.detectSpots.run(sourceAmpImage)
+                    sourceMask = detectedSourceResults.sourceMask
+                    signal = detectedSourceResults.signal
 
                 sourcePixels = (sourceMask & (sourceAmpMask & bad == 0) 
                     & np.isfinite(sourceAmpImage.image.array))
