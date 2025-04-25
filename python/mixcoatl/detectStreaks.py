@@ -112,7 +112,8 @@ class DetectStreaksTask(pipeBase.Task):
         return pipeBase.Struct(
             signal=signal,
             sourceMask=sourceMask,
-            line=line
+            line=line,
+            edges=edges
         )
 
     def findClusters(self, lines):
