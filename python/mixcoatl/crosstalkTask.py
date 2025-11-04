@@ -35,8 +35,8 @@ import lsst.pipe.base.connectionTypes as cT
 from lsst.pex.config import Field, ChoiceField, ListField, ConfigurableField
 
 import mixcoatl.crosstalk as mixCrosstalk
-from mixcoatl.detectStreaks import DetectStreaksTask
-from mixcoatl.detectSpots import DetectSpotsTask
+from mixcoatl.detectStreakSources import DetectStreakSourcesTask
+from mixcoatl.detectSpotSources import DetectSpotSourcesTask
 from mixcoatl.crosstalk import CrosstalkModelFitTask
 
 class CrosstalkTaskConnections(pipeBase.PipelineTaskConnections,
@@ -132,12 +132,12 @@ class CrosstalkTaskConfig(pipeBase.PipelineTaskConfig,
             "spot" : "Large spot as a crosstalk source."
         }
     )
-    detectStreaks = ConfigurableField(
-        target=DetectStreaksTask,
+    detectStreakSources = ConfigurableField(
+        target=DetectStreakSourcesTask,
         doc="Detect streaks as crosstalk sources."
     )
-    detectSpots = ConfigurableField(
-        target=DetectSpotsTask,
+    detectSpotSources = ConfigurableField(
+        target=DetectSpotSourcesTask,
         doc="Detect spots as crosstalk sources."
     )
     crosstalkSolve = ConfigurableField(
@@ -219,14 +219,19 @@ class CrosstalkTask(pipeBase.PipelineTask):
                 ## Find source
                 try:
                     if self.config.sourceType == 'streak':
-                        detectedSourceResults = self.detectStreaks.run(sourceAmpImage)
+
+                        detectedSourceResults = self.detectStreakSources.run(sourceAmpImage)
+                        sourceMask = detectedSourceResults.sourceMask
+                        signal = detectedSourceResults.signals[-1]
+
                     elif self.config.sourceType == 'spot':
-                        detectedSourceResults = self.detectSpots.run(sourceAmpImage)
+
+                        detectedSourceResults = self.detectSpotSources.run(sourceAmpImage)
+                        sourceMask = detectedSourceResults.sourceMask
+                        signal = detectedSourceResults.signal
                 except RuntimeError:
                     continue
 
-                sourceMask = detectedSourceResults.sourceMask
-                signal = detectedSourceResults.signal
 
                 sourcePixels = (sourceMask & (sourceAmpMask & bad == 0) 
                     & np.isfinite(sourceAmpImage.image.array))

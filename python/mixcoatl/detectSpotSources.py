@@ -29,7 +29,7 @@ import lsst.pipe.base as pipeBase
 
 import mixcoatl.crosstalk as mixCrosstalk
 
-class DetectSpotsConfig(pexConfig.Config):
+class DetectSpotSourcesConfig(pexConfig.Config):
 
     threshold = pexConfig.Field(
         dtype=float,
@@ -57,9 +57,9 @@ class DetectSpotsConfig(pexConfig.Config):
         doc="Outer radius of annulur mask used for cutout."
     )
     
-class DetectSpotsTask(pipeBase.Task):
+class DetectSpotSourcesTask(pipeBase.Task):
     
-    ConfigClass = DetectSpotsConfig
+    ConfigClass = DetectSpotSourcesConfig
     _DefaultName = "detectLines"
 
     @timeMethod

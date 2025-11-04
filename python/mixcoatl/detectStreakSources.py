@@ -33,7 +33,7 @@ import lsst.kht
 
 import mixcoatl.crosstalk as mixCrosstalk
 
-class DetectStreaksConfig(pexConfig.Config):
+class DetectStreakSourcesConfig(pexConfig.Config):
 
     maskWidth = pexConfig.Field(
         dtype=float,
@@ -68,10 +68,10 @@ class DetectStreaksConfig(pexConfig.Config):
         default=2,
     )
     
-class DetectStreaksTask(pipeBase.Task):
+class DetectStreakSourcesTask(pipeBase.Task):
     
-    ConfigClass = DetectStreaksConfig
-    _DefaultName = "detectStreaks"
+    ConfigClass = DetectStreakSourcesConfig
+    _DefaultName = "detectStreakSources"
 
     @timeMethod
     def run(self, maskedImage):
@@ -100,19 +100,20 @@ class DetectStreaksTask(pipeBase.Task):
         if len(lines) < 2:
             raise RuntimeError("No crosstalk source detected.")
         
-        result = self.findClusters(lines)
-        result = sorted(result, key=lambda x : sigma_clipped_stats(imarr, mask=~mixCrosstalk.make_streak_mask(imarr, x, 1.0), 
-                                                                   cenfunc='median', stdfunc=median_absolute_deviation)[1])
+        streaks = self.findClusters(lines)
+        streaks = sorted(streaks, key=lambda x : sigma_clipped_stats(imarr, mask=~mixCrosstalk.make_streak_mask(imarr, x, 1.0), 
+                                                                     cenfunc='median', stdfunc=median_absolute_deviation)[1])
 
-        line = result[-1]
-        sourceMask = mixCrosstalk.make_streak_mask(imarr, line, self.config.maskWidth)
-        signal = sigma_clipped_stats(imarr, mask=~mixCrosstalk.make_streak_mask(imarr, line, 1.0),
-                                     cenfunc='median', stdfunc=median_absolute_deviation)[1]
+        signals = [sigma_clipped_stats(imarr, mask=~mixCrosstalk.make_streak_mask(imarr, streaks[-1], 1.0),
+                                       cenfunc='median', stdfunc=median_absolute_deviation)[1] for s in streaks]
+        sourceMask = mixCrosstalk.make_streak_mask(imarr, streaks[-1], self.config.maskWidth)
 
         return pipeBase.Struct(
-            signal=signal,
+            signals=signals,
             sourceMask=sourceMask,
-            line=line
+            streaks=streaks,
+            edges=edges,
+            hough=h
         )
 
     def findClusters(self, lines):
