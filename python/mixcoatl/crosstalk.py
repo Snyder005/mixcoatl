@@ -22,6 +22,7 @@
 import copy
 import numpy as np
 from astropy.io import fits
+from scipy.ndimage import shift
 
 from lsst.utils.timer import timeMethod
 import lsst.afw.image as afwImage
@@ -201,6 +202,7 @@ def make_background_model(params, shape):
 
 def make_crosstalk_model(crosstalk_params, background_params, source_imarr):
     """Create crosstalk target model.
+
     Parameters
     ----------
     crosstalk_params: `dict`
@@ -212,6 +214,8 @@ def make_crosstalk_model(crosstalk_params, background_params, source_imarr):
             First-order nonlinear crosstalk term (`float`).
         `"c2"`
             Second-order nonlinear crosstalk term (`float`).
+        `"delay"`
+            Crosstalk response delay term (`float`)
     background_params : `dict`
         Background model parameters dictionary with keys:
 
@@ -229,6 +233,7 @@ def make_crosstalk_model(crosstalk_params, background_params, source_imarr):
             Second order xy term (`float`).
     source_imarr : `numpy.ndarray`, (Ny, Nx)
         2-D source image pixel array.
+
     Returns
     -------
     model : `numpy.ndarray`, (Ny, Nx)
@@ -238,10 +243,11 @@ def make_crosstalk_model(crosstalk_params, background_params, source_imarr):
     c0 = crosstalk_params['c0']
     c1 = crosstalk_params.get('c1', 0.0)
     c2 = crosstalk_params.get('c2', 0.0)
+    d = crosstalk_params.get('delay', 0.0)
     bg = make_background_model(background_params, source_imarr.shape)
 
     ## Construct model
-    s = source_imarr
+    s = source_imarr*(1-d)+shift(source_imarr, (0, -1))*d
     model = bg + c0*s + c1*np.abs(s)*s + c2*s*s*s
     
     return model
