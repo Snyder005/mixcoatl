@@ -33,7 +33,7 @@ import lsst.kht
 
 import mixcoatl.crosstalk as mixCrosstalk
 
-class DetectStreaksConfig(pexConfig.Config):
+class DetectStreakSourcesConfig(pexConfig.Config):
 
     maskWidth = pexConfig.Field(
         dtype=float,
@@ -68,10 +68,10 @@ class DetectStreaksConfig(pexConfig.Config):
         default=2,
     )
     
-class DetectStreaksTask(pipeBase.Task):
+class DetectStreakSourcesTask(pipeBase.Task):
     
-    ConfigClass = DetectStreaksConfig
-    _DefaultName = "detectStreaks"
+    ConfigClass = DetectStreakSourcesConfig
+    _DefaultName = "detectStreakSources"
 
     @timeMethod
     def run(self, maskedImage):
